@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#287460" />
+    <title>心情表格</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./assets/icon-192.png" />
+    <link rel="stylesheet" href="./styles.css?v=2" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">心</div>
+          <div>
+            <h1>心情表格</h1>
+            <p id="saveStatus">已在本机保存</p>
+          </div>
+        </div>
+        <button id="installButton" class="quiet-button hidden" type="button">安装到手机</button>
+      </header>
+
+      <main>
+        <section class="day-workspace" aria-label="记录日期">
+          <div class="day-title">
+            <span class="eyebrow">正在记录</span>
+            <h2 id="selectedDateTitle">今天</h2>
+            <span id="dayRecordSummary" class="day-summary">0 条记录</span>
+          </div>
+
+          <div class="day-controls">
+            <div class="segmented-control" aria-label="查看范围">
+              <button id="dayViewButton" class="segment active" type="button">按天</button>
+              <button id="allViewButton" class="segment" type="button">全部</button>
+            </div>
+            <div id="dateNavigator" class="date-navigator">
+              <button id="previousDayButton" class="icon-button" type="button" title="前一天" aria-label="前一天">‹</button>
+              <input id="selectedDateInput" type="date" aria-label="选择日期" />
+              <button id="nextDayButton" class="icon-button" type="button" title="后一天" aria-label="后一天">›</button>
+              <button id="todayButton" class="quiet-button" type="button">今天</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="control-panel" aria-label="模板和数据控制">
+          <div class="template-row">
+            <label class="field-label" for="templateSelect">当前模板</label>
+            <select id="templateSelect"></select>
+            <button id="newTemplateButton" class="tool-button" type="button">新建模板</button>
+            <button id="renameTemplateButton" class="tool-button" type="button">编辑模板</button>
+            <button id="deleteTemplateButton" class="danger-button" type="button">删除</button>
+          </div>
+
+          <div class="action-grid">
+            <button id="addRowButton" class="primary-button" type="button">＋ 添加记录</button>
+            <button id="addColumnButton" class="tool-button" type="button">添加一列</button>
+            <button id="exportButton" class="tool-button" type="button">导出当天 CSV</button>
+            <label class="file-button" for="csvFileInput">导入 CSV</label>
+            <input id="csvFileInput" class="sr-only" type="file" accept=".csv,text/csv" />
+          </div>
+
+          <div class="search-row">
+            <label class="field-label" for="searchInput">筛选记录</label>
+            <input id="searchInput" type="search" placeholder="搜索心情、事件或备注" autocomplete="off" />
+            <button id="clearSearchButton" class="quiet-button" type="button">清空</button>
+          </div>
+        </section>
+
+        <section class="stats-strip" aria-label="当前页面统计">
+          <div class="stat-card stat-count">
+            <span>记录</span>
+            <strong id="recordCount">0</strong>
+          </div>
+          <div class="stat-card stat-average">
+            <span>平均心情</span>
+            <strong id="moodAverage">-</strong>
+          </div>
+          <div class="stat-card stat-high">
+            <span>最高</span>
+            <strong id="moodMax">-</strong>
+          </div>
+          <div class="stat-card stat-low">
+            <span>最低</span>
+            <strong id="moodMin">-</strong>
+          </div>
+        </section>
+
+        <section class="sheet-frame" aria-label="心情记录表格">
+          <div class="sheet-heading">
+            <div>
+              <strong id="sheetTitle">当天记录</strong>
+              <span>点击单元格即可填写，内容会自动保存</span>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table id="moodTable">
+              <thead id="tableHead"></thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+          <div id="emptyState" class="empty-state hidden">
+            <div class="empty-mark" aria-hidden="true">＋</div>
+            <strong id="emptyStateTitle">今天还没有记录</strong>
+            <span id="emptyStateCopy">添加一条，把此刻的感受放在这里。</span>
+            <button id="emptyAddButton" class="primary-button" type="button">添加第一条记录</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="templateDialog" class="dialog">
+      <form method="dialog" id="templateForm">
+        <div class="dialog-heading">
+          <span class="eyebrow">模板设置</span>
+          <h2 id="templateDialogTitle">新建模板</h2>
+        </div>
+        <label class="stacked-field">
+          <span>模板名称</span>
+          <input id="templateNameInput" type="text" maxlength="40" required />
+        </label>
+        <label class="stacked-field">
+          <span>列名，一行一个</span>
+          <textarea id="templateColumnsInput" rows="8" required></textarea>
+        </label>
+        <div class="dialog-actions">
+          <button class="quiet-button" id="cancelTemplateButton" type="button">取消</button>
+          <button class="primary-button" id="saveTemplateButton" value="default" type="submit">保存模板</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="importDialog" class="dialog">
+      <form method="dialog" id="importForm">
+        <div class="dialog-heading">
+          <span class="eyebrow">数据导入</span>
+          <h2>导入 CSV</h2>
+        </div>
+        <p id="importSummary" class="dialog-copy"></p>
+        <fieldset class="radio-group">
+          <legend>导入方式</legend>
+          <label>
+            <input type="radio" name="importMode" value="append" checked />
+            追加到当前表格
+          </label>
+          <label>
+            <input type="radio" name="importMode" value="replace" />
+            覆盖当前表格
+          </label>
+        </fieldset>
+        <p class="import-date-note">没有日期的数据会归到当前选中的日期。</p>
+        <div class="dialog-actions">
+          <button class="quiet-button" id="cancelImportButton" type="button">取消</button>
+          <button class="primary-button" id="confirmImportButton" value="default" type="submit">开始导入</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    <script src="./app.js?v=4" defer></script>
+  </body>
+</html>

@@ -1,9 +1,9 @@
-const CACHE_NAME = "mood-table-app-v4";
+const CACHE_NAME = "mood-table-app-v6";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=2",
-  "./app.js?v=4",
+  "./styles.css?v=6",
+  "./app.js?v=6",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",

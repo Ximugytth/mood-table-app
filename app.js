@@ -10,12 +10,12 @@
   const DEFAULT_COLUMNS = [
     "日期",
     "时间",
-    "心情分数",
-    "情绪标签",
-    "事件",
-    "睡眠",
+    "愉快",
+    "能量",
     "压力",
-    "备注",
+    "腰痛",
+    "反刍",
+    "活动",
   ];
 
   const state = {
@@ -24,6 +24,7 @@
     records: [],
     selectedDate: todayDate(),
     viewMode: "day",
+    activeView: "overview",
     search: "",
     sort: { columnId: "", direction: "" },
     templateDialogMode: "create",
@@ -48,23 +49,37 @@
     newTemplateButton: document.getElementById("newTemplateButton"),
     renameTemplateButton: document.getElementById("renameTemplateButton"),
     deleteTemplateButton: document.getElementById("deleteTemplateButton"),
-    addRowButton: document.getElementById("addRowButton"),
     addColumnButton: document.getElementById("addColumnButton"),
     exportButton: document.getElementById("exportButton"),
     csvFileInput: document.getElementById("csvFileInput"),
     searchInput: document.getElementById("searchInput"),
     clearSearchButton: document.getElementById("clearSearchButton"),
-    tableHead: document.getElementById("tableHead"),
-    tableBody: document.getElementById("tableBody"),
-    sheetTitle: document.getElementById("sheetTitle"),
-    emptyState: document.getElementById("emptyState"),
-    emptyStateTitle: document.getElementById("emptyStateTitle"),
-    emptyStateCopy: document.getElementById("emptyStateCopy"),
-    emptyAddButton: document.getElementById("emptyAddButton"),
+    overviewView: document.getElementById("overviewView"),
+    recordView: document.getElementById("recordView"),
+    openRecordButton: document.getElementById("openRecordButton"),
+    summaryRecordButton: document.getElementById("summaryRecordButton"),
+    summaryTitle: document.getElementById("summaryTitle"),
+    overviewList: document.getElementById("overviewList"),
+    overviewEmptyState: document.getElementById("overviewEmptyState"),
     recordCount: document.getElementById("recordCount"),
+    moodAverageLabel: document.getElementById("moodAverageLabel"),
     moodAverage: document.getElementById("moodAverage"),
     moodMax: document.getElementById("moodMax"),
     moodMin: document.getElementById("moodMin"),
+    recordBackButton: document.getElementById("recordBackButton"),
+    recordDateTitle: document.getElementById("recordDateTitle"),
+    recordPageSummary: document.getElementById("recordPageSummary"),
+    recordPreviousDayButton: document.getElementById("recordPreviousDayButton"),
+    recordDateInput: document.getElementById("recordDateInput"),
+    recordNextDayButton: document.getElementById("recordNextDayButton"),
+    recordTodayButton: document.getElementById("recordTodayButton"),
+    recordAddButton: document.getElementById("recordAddButton"),
+    entryScroll: document.getElementById("entryScroll"),
+    entryTable: document.getElementById("entryTable"),
+    entryTableHead: document.getElementById("entryTableHead"),
+    entryTableBody: document.getElementById("entryTableBody"),
+    recordEmptyState: document.getElementById("recordEmptyState"),
+    recordEmptyAddButton: document.getElementById("recordEmptyAddButton"),
     templateDialog: document.getElementById("templateDialog"),
     templateForm: document.getElementById("templateForm"),
     templateDialogTitle: document.getElementById("templateDialogTitle"),
@@ -235,6 +250,19 @@
       template?.columns.find((column) => column.name.includes("日期"));
   }
 
+  function getTimeColumn(template = getActiveTemplate()) {
+    return template?.columns.find((column) => column.name.trim() === "时间") ||
+      template?.columns.find((column) => column.name.includes("时间"));
+  }
+
+  function getMetricColumns(template = getActiveTemplate()) {
+    const dateColumn = getDateColumn(template);
+    const timeColumn = getTimeColumn(template);
+    return (template?.columns || []).filter(
+      (column) => column.id !== dateColumn?.id && column.id !== timeColumn?.id
+    );
+  }
+
   function inferRecordDate(record, template = getActiveTemplate()) {
     const storedDate = normalizeDateValue(record.pageDate);
     if (storedDate) {
@@ -273,8 +301,9 @@
   function render() {
     renderTemplateSelect();
     renderDateWorkspace();
-    renderTable();
     renderStats();
+    renderOverviewSummary();
+    renderRecordPage();
   }
 
   function getScopedRecords() {
@@ -288,7 +317,7 @@
     const scopedCount = getScopedRecords().length;
     const isDay = state.viewMode === "day";
     els.selectedDateTitle.textContent = isDay ? formatDateTitle(state.selectedDate) : "全部记录";
-    els.dayRecordSummary.textContent = `${scopedCount} 条记录`;
+    els.dayRecordSummary.textContent = `${scopedCount} 个时间点`;
     els.selectedDateInput.value = state.selectedDate;
     els.dateNavigator.classList.toggle("hidden", !isDay);
     els.dayViewButton.classList.toggle("active", isDay);
@@ -296,7 +325,7 @@
     els.dayViewButton.setAttribute("aria-pressed", String(isDay));
     els.allViewButton.setAttribute("aria-pressed", String(!isDay));
     els.exportButton.textContent = isDay ? "导出当天 CSV" : "导出全部 CSV";
-    els.sheetTitle.textContent = isDay ? "当天记录" : "全部记录";
+    els.summaryTitle.textContent = isDay ? "当天记录" : "全部记录";
   }
 
   function renderTemplateSelect() {
@@ -340,141 +369,204 @@
     return records;
   }
 
-  function renderTable() {
+  function recordTime(record, template = getActiveTemplate()) {
+    const timeColumn = getTimeColumn(template);
+    return String(timeColumn ? record.values?.[timeColumn.id] || "" : record.entryTime || "");
+  }
+
+  function renderOverviewSummary() {
     const template = getActiveTemplate();
     if (!template) {
       return;
     }
-    els.tableHead.innerHTML = "";
-    els.tableBody.innerHTML = "";
+    const visibleRecords = getVisibleRecords();
+    const metricColumns = getMetricColumns(template);
+    els.overviewList.innerHTML = "";
+
+    visibleRecords.forEach((record) => {
+      const item = document.createElement("article");
+      item.className = "summary-item";
+
+      const time = document.createElement("div");
+      time.className = "summary-time";
+      const timeLabel = recordTime(record, template) || "--:--";
+      time.textContent =
+        state.viewMode === "all"
+          ? `${inferRecordDate(record, template).slice(5)} ${timeLabel}`
+          : timeLabel;
+
+      const values = document.createElement("div");
+      values.className = "summary-values";
+      metricColumns.forEach((column) => {
+        const value = String(record.values?.[column.id] || "").trim();
+        if (!value) {
+          return;
+        }
+        const part = document.createElement("span");
+        part.className = "summary-value";
+        const label = document.createElement("strong");
+        label.textContent = `${column.name} `;
+        part.append(label, document.createTextNode(value));
+        values.append(part);
+      });
+      if (!values.childElementCount) {
+        const empty = document.createElement("span");
+        empty.className = "summary-value";
+        empty.textContent = "尚未填写指标";
+        values.append(empty);
+      }
+      item.append(time, values);
+      els.overviewList.append(item);
+    });
+
+    els.overviewEmptyState.classList.toggle("hidden", visibleRecords.length > 0);
+  }
+
+  function inputModeFor(columnName) {
+    return /心情|愉快|能量|压力|疼|痛|反刍|睡眠|评分|分数/.test(columnName)
+      ? "decimal"
+      : "text";
+  }
+
+  function queueRecordSave() {
+    clearTimeout(queueRecordSave.timer);
+    queueRecordSave.timer = setTimeout(() => {
+      queueRecordSave.timer = null;
+      saveRecords();
+    }, 180);
+  }
+
+  function flushRecordSave() {
+    if (!queueRecordSave.timer) {
+      return;
+    }
+    clearTimeout(queueRecordSave.timer);
+    queueRecordSave.timer = null;
+    saveRecords();
+  }
+
+  function focusEntry(recordId, metricIndex) {
+    const input = els.entryTableBody.querySelector(
+      `[data-record-id="${recordId}"][data-metric-index="${metricIndex}"]`
+    );
+    if (input) {
+      input.focus({ preventScroll: true });
+      input.scrollIntoView({ block: "center", inline: "nearest" });
+    }
+  }
+
+  function renderRecordPage() {
+    const template = getActiveTemplate();
+    if (!template) {
+      return;
+    }
+    const records = state.records.filter(
+      (record) => inferRecordDate(record, template) === state.selectedDate
+    );
+    const metrics = getMetricColumns(template);
+    const timeColumn = getTimeColumn(template);
+
+    els.recordDateTitle.textContent = formatDateTitle(state.selectedDate);
+    els.recordPageSummary.textContent = `${records.length} 个时间点`;
+    els.recordDateInput.value = state.selectedDate;
+    els.entryTableHead.innerHTML = "";
+    els.entryTableBody.innerHTML = "";
 
     const headRow = document.createElement("tr");
-    const rowHeader = document.createElement("th");
-    rowHeader.textContent = "行";
-    headRow.append(rowHeader);
+    const metricHeading = document.createElement("th");
+    metricHeading.className = "metric-heading";
+    metricHeading.textContent = "指标";
+    headRow.append(metricHeading);
 
-    template.columns.forEach((column) => {
+    records.forEach((record) => {
       const th = document.createElement("th");
       const wrapper = document.createElement("div");
-      wrapper.className = "column-head";
+      wrapper.className = "time-heading";
 
-      const input = document.createElement("input");
-      input.value = column.name;
-      input.setAttribute("aria-label", `列名：${column.name}`);
-      input.addEventListener("change", () => renameColumn(column.id, input.value));
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          input.blur();
+      const timeInput = document.createElement("input");
+      timeInput.className = "time-input";
+      timeInput.type = "time";
+      timeInput.value = recordTime(record, template);
+      timeInput.setAttribute("aria-label", "记录时间");
+      timeInput.addEventListener("input", () => {
+        if (timeColumn) {
+          record.values[timeColumn.id] = timeInput.value;
+        } else {
+          record.entryTime = timeInput.value;
+        }
+        record.updatedAt = nowIso();
+        queueRecordSave();
+      });
+      timeInput.addEventListener("change", flushRecordSave);
+
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "delete-time-button";
+      deleteButton.type = "button";
+      deleteButton.textContent = "×";
+      deleteButton.title = "删除这个时间点";
+      deleteButton.setAttribute("aria-label", `删除 ${timeInput.value || "这个"} 时间点`);
+      deleteButton.addEventListener("click", () => {
+        const label = recordTime(record, template) || "这个";
+        if (confirm(`删除 ${label} 的记录？`)) {
+          deleteRow(record.id);
         }
       });
 
-      const actions = document.createElement("div");
-      actions.className = "column-actions";
-      const sortButton = document.createElement("button");
-      sortButton.className = "tiny-button tool-button";
-      sortButton.type = "button";
-      sortButton.textContent = sortLabel(column.id);
-      sortButton.title = "按这一列排序";
-      sortButton.addEventListener("click", () => toggleSort(column.id));
-
-      const deleteButton = document.createElement("button");
-      deleteButton.className = "tiny-button danger-button";
-      deleteButton.type = "button";
-      deleteButton.textContent = "删列";
-      deleteButton.title = "删除这一列";
-      deleteButton.addEventListener("click", () => deleteColumn(column.id));
-
-      actions.append(sortButton, deleteButton);
-      wrapper.append(input, actions);
+      wrapper.append(timeInput, deleteButton);
       th.append(wrapper);
       headRow.append(th);
     });
-    els.tableHead.append(headRow);
+    els.entryTableHead.append(headRow);
 
-    const visibleRecords = getVisibleRecords();
-    visibleRecords.forEach((record, visibleIndex) => {
+    metrics.forEach((column, metricIndex) => {
       const tr = document.createElement("tr");
-      const rowToolCell = document.createElement("td");
-      const originalIndex = state.records.findIndex((item) => item.id === record.id);
-      rowToolCell.innerHTML = "";
+      const nameCell = document.createElement("th");
+      nameCell.className = "metric-name";
+      nameCell.scope = "row";
+      nameCell.textContent = column.name;
+      tr.append(nameCell);
 
-      const tools = document.createElement("div");
-      tools.className = "row-tools";
-      const number = document.createElement("span");
-      number.className = "row-number";
-      number.textContent = String(visibleIndex + 1);
-      const deleteRowButton = document.createElement("button");
-      deleteRowButton.className = "tiny-button danger-button";
-      deleteRowButton.type = "button";
-      deleteRowButton.textContent = "删除";
-      deleteRowButton.addEventListener("click", () => deleteRow(record.id));
-      tools.append(number, deleteRowButton);
-      rowToolCell.append(tools);
-      tr.append(rowToolCell);
-
-      template.columns.forEach((column) => {
+      records.forEach((record) => {
         const td = document.createElement("td");
-        const cell = document.createElement("div");
-        cell.className = "cell";
-        cell.contentEditable = "true";
-        cell.dataset.placeholder = placeholderFor(column.name, originalIndex);
-        cell.textContent = record.values?.[column.id] || "";
-        cell.setAttribute("aria-label", `${column.name} 第 ${visibleIndex + 1} 行`);
-        cell.addEventListener("input", () => {
-          record.values[column.id] = cell.innerText;
+        td.className = "entry-cell";
+        const input = document.createElement("input");
+        input.className = "entry-input";
+        input.type = "text";
+        input.inputMode = inputModeFor(column.name);
+        input.enterKeyHint = metricIndex === metrics.length - 1 ? "done" : "next";
+        input.autocomplete = "off";
+        input.value = record.values?.[column.id] || "";
+        input.placeholder = input.inputMode === "decimal" ? "填写数值" : "填写内容";
+        input.dataset.recordId = record.id;
+        input.dataset.metricIndex = String(metricIndex);
+        input.setAttribute("aria-label", `${column.name}，${recordTime(record, template) || "当前时间"}`);
+        input.addEventListener("input", () => {
+          record.values[column.id] = input.value;
           record.updatedAt = nowIso();
-          saveRecords();
-          renderStats();
+          queueRecordSave();
         });
-        cell.addEventListener("blur", () => {
-          record.values[column.id] = cell.innerText.trimEnd();
-          if (column.id === getDateColumn(template)?.id) {
-            const nextPageDate = normalizeDateValue(record.values[column.id]);
-            if (nextPageDate) {
-              record.pageDate = nextPageDate;
-            }
+        input.addEventListener("change", flushRecordSave);
+        input.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") {
+            return;
           }
-          record.updatedAt = nowIso();
-          saveRecords();
-          render();
+          event.preventDefault();
+          if (metricIndex < metrics.length - 1) {
+            focusEntry(record.id, metricIndex + 1);
+          } else {
+            input.blur();
+            flushRecordSave();
+          }
         });
-        td.append(cell);
+        td.append(input);
         tr.append(td);
       });
-      els.tableBody.append(tr);
+      els.entryTableBody.append(tr);
     });
 
-    const hasVisibleRecords = visibleRecords.length > 0;
-    els.emptyState.classList.toggle("hidden", hasVisibleRecords);
-    if (!hasVisibleRecords && state.search.trim()) {
-      els.emptyStateTitle.textContent = "没有找到匹配的记录";
-      els.emptyStateCopy.textContent = "换一个关键词，或者清空筛选再看看。";
-      els.emptyAddButton.classList.add("hidden");
-    } else if (!hasVisibleRecords && state.viewMode === "all") {
-      els.emptyStateTitle.textContent = "还没有任何记录";
-      els.emptyStateCopy.textContent = "从今天开始，留下一条属于自己的记录。";
-      els.emptyAddButton.classList.remove("hidden");
-    } else {
-      els.emptyStateTitle.textContent =
-        state.selectedDate === todayDate() ? "今天还没有记录" : "这一天还没有记录";
-      els.emptyStateCopy.textContent = "添加一条，把此刻的感受放在这里。";
-      els.emptyAddButton.classList.remove("hidden");
-    }
-  }
-
-  function sortLabel(columnId) {
-    if (state.sort.columnId !== columnId || !state.sort.direction) {
-      return "排序";
-    }
-    return state.sort.direction === "asc" ? "升序" : "降序";
-  }
-
-  function placeholderFor(columnName, rowIndex) {
-    if (columnName === "日期") return state.selectedDate;
-    if (columnName === "时间") return currentTime();
-    if (columnName.includes("心情")) return "1-10";
-    return "";
+    const isEmpty = records.length === 0;
+    els.entryTable.classList.toggle("hidden", isEmpty);
+    els.recordEmptyState.classList.toggle("hidden", !isEmpty);
   }
 
   function renderStats() {
@@ -485,7 +577,10 @@
       ? `${visibleRecords.length}/${scopedRecords.length}`
       : String(scopedRecords.length);
 
-    const moodColumn = template?.columns.find((column) => column.name.includes("心情"));
+    const moodColumn = template?.columns.find((column) =>
+      /心情|愉快|情绪/.test(column.name)
+    );
+    els.moodAverageLabel.textContent = moodColumn ? `平均${moodColumn.name}` : "平均指标";
     const values = moodColumn
       ? visibleRecords
           .map((record) => parseFloat(String(record.values?.[moodColumn.id] || "").replace(",", ".")))
@@ -505,28 +600,51 @@
     els.moodMin.textContent = String(Math.min(...values));
   }
 
+  function switchView(view) {
+    flushRecordSave();
+    state.activeView = view;
+    if (view === "record") {
+      state.viewMode = "day";
+    }
+    document.body.classList.toggle("record-mode", view === "record");
+    els.overviewView.classList.toggle("hidden", view !== "overview");
+    els.recordView.classList.toggle("hidden", view !== "record");
+    render();
+  }
+
   function addRow() {
     const template = getActiveTemplate();
     if (state.viewMode === "all") {
       state.viewMode = "day";
     }
     const dateColumn = getDateColumn(template);
+    const timeColumn = getTimeColumn(template);
     const values = {};
     template.columns.forEach((column) => {
       if (column.id === dateColumn?.id) values[column.id] = state.selectedDate;
-      else if (column.name === "时间") values[column.id] = currentTime();
+      else if (column.id === timeColumn?.id) values[column.id] = currentTime();
       else values[column.id] = "";
     });
-    state.records.push({
+    const record = {
       id: uid("row"),
       values,
       pageDate: state.selectedDate,
+      entryTime: timeColumn ? "" : currentTime(),
       createdAt: nowIso(),
       updatedAt: nowIso(),
-    });
+    };
+    state.records.push(record);
     saveRecords();
-    render();
-    showToast("已添加一条记录");
+    switchView("record");
+    requestAnimationFrame(() => {
+      if (getMetricColumns(template).length > 0) {
+        focusEntry(record.id, 0);
+      } else {
+        const timeInputs = els.entryTableHead.querySelectorAll(".time-input");
+        timeInputs[timeInputs.length - 1]?.focus();
+      }
+    });
+    showToast("已添加一个时间点");
   }
 
   function deleteRow(recordId) {
@@ -619,7 +737,7 @@
     } else {
       state.sort = { columnId: "", direction: "" };
     }
-    renderTable();
+    renderOverviewSummary();
   }
 
   function openTemplateDialog(mode) {
@@ -709,9 +827,18 @@
     const template = getActiveTemplate();
     const exportRecords = getScopedRecords();
     const dateColumn = getDateColumn(template);
-    const exportColumns = dateColumn
+    const timeColumn = getTimeColumn(template);
+    let exportColumns = dateColumn
       ? template.columns
       : [{ id: "__pageDate", name: "记录日期" }, ...template.columns];
+    if (!timeColumn) {
+      const dateIndex = exportColumns.findIndex(
+        (column) => column.id === "__pageDate" || column.id === dateColumn?.id
+      );
+      const insertIndex = dateIndex >= 0 ? dateIndex + 1 : 0;
+      exportColumns = [...exportColumns];
+      exportColumns.splice(insertIndex, 0, { id: "__entryTime", name: "记录时间" });
+    }
     const rows = [
       exportColumns.map((column) => column.name),
       ...exportRecords.map((record) =>
@@ -719,8 +846,14 @@
           if (column.id === "__pageDate") {
             return inferRecordDate(record, template);
           }
+          if (column.id === "__entryTime") {
+            return recordTime(record, template);
+          }
           if (column.id === dateColumn?.id) {
             return record.values?.[column.id] || inferRecordDate(record, template);
+          }
+          if (column.id === timeColumn?.id) {
+            return record.values?.[column.id] || recordTime(record, template);
           }
           return record.values?.[column.id] || "";
         })
@@ -915,8 +1048,27 @@
         render();
       }
     });
+    els.openRecordButton.addEventListener("click", () => switchView("record"));
+    els.summaryRecordButton.addEventListener("click", addRow);
+    els.recordBackButton.addEventListener("click", () => switchView("overview"));
+    els.recordPreviousDayButton.addEventListener("click", () => shiftSelectedDate(-1));
+    els.recordNextDayButton.addEventListener("click", () => shiftSelectedDate(1));
+    els.recordTodayButton.addEventListener("click", () => {
+      state.selectedDate = todayDate();
+      state.viewMode = "day";
+      render();
+    });
+    els.recordDateInput.addEventListener("change", () => {
+      const date = normalizeDateValue(els.recordDateInput.value);
+      if (date) {
+        state.selectedDate = date;
+        state.viewMode = "day";
+        render();
+      }
+    });
 
     els.templateSelect.addEventListener("change", () => {
+      flushRecordSave();
       state.activeTemplateId = els.templateSelect.value;
       localStorage.setItem(STORAGE.activeTemplateId, state.activeTemplateId);
       state.sort = { columnId: "", direction: "" };
@@ -927,14 +1079,14 @@
     els.newTemplateButton.addEventListener("click", () => openTemplateDialog("create"));
     els.renameTemplateButton.addEventListener("click", () => openTemplateDialog("edit"));
     els.deleteTemplateButton.addEventListener("click", deleteTemplate);
-    els.addRowButton.addEventListener("click", addRow);
-    els.emptyAddButton.addEventListener("click", addRow);
+    els.recordAddButton.addEventListener("click", addRow);
+    els.recordEmptyAddButton.addEventListener("click", addRow);
     els.addColumnButton.addEventListener("click", addColumn);
     els.exportButton.addEventListener("click", exportCsv);
     els.csvFileInput.addEventListener("change", (event) => onCsvFileSelected(event.target.files[0]));
     els.searchInput.addEventListener("input", () => {
       state.search = els.searchInput.value;
-      renderTable();
+      renderOverviewSummary();
       renderStats();
     });
     els.clearSearchButton.addEventListener("click", () => {
@@ -982,6 +1134,8 @@
       state.deferredInstallPrompt = null;
       els.installButton.classList.add("hidden");
     });
+
+    window.addEventListener("pagehide", flushRecordSave);
   }
 
   async function registerServiceWorker() {
@@ -997,7 +1151,7 @@
 
   loadApp();
   bindEvents();
-  render();
+  switchView("overview");
   markSaved();
   registerServiceWorker();
 })();

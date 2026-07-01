@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=6" />
+    <link rel="stylesheet" href="./styles.css?v=7.1" />
   </head>
   <body>
     <div class="app-shell">
@@ -65,6 +65,10 @@
               <button id="exportButton" class="tool-button" type="button">导出当天 CSV</button>
               <label class="file-button" for="csvFileInput">导入 CSV</label>
               <input id="csvFileInput" class="sr-only" type="file" accept=".csv,text/csv" />
+              <button id="analyticsButton" class="tool-button" type="button">分析设置</button>
+              <button id="backupButton" class="tool-button" type="button">完整备份</button>
+              <label class="file-button" for="backupFileInput">恢复备份</label>
+              <input id="backupFileInput" class="sr-only" type="file" accept=".json,application/json" />
             </div>
 
             <div class="search-row">
@@ -90,6 +94,30 @@
             <div class="stat-card stat-low">
               <span>最低</span>
               <strong id="moodMin">-</strong>
+            </div>
+          </section>
+
+          <section class="trend-preview" aria-label="最近七天情绪趋势">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">最近 7 天</span>
+                <h3>三轴状态趋势</h3>
+              </div>
+              <button id="openTrendsButton" class="primary-button" type="button">查看趋势</button>
+            </div>
+            <div class="mini-chart-grid">
+              <article class="mini-chart-item">
+                <div><span>愉快</span><strong id="miniValenceValue">-</strong></div>
+                <canvas id="miniValenceCanvas" aria-label="最近七天愉快趋势"></canvas>
+              </article>
+              <article class="mini-chart-item">
+                <div><span>能量</span><strong id="miniEnergyValue">-</strong></div>
+                <canvas id="miniEnergyCanvas" aria-label="最近七天能量趋势"></canvas>
+              </article>
+              <article class="mini-chart-item">
+                <div><span>焦虑</span><strong id="miniTensionValue">-</strong></div>
+                <canvas id="miniTensionCanvas" aria-label="最近七天焦虑趋势"></canvas>
+              </article>
             </div>
           </section>
 
@@ -139,6 +167,60 @@
               <strong>这一天还没有时间点</strong>
               <button id="recordEmptyAddButton" class="primary-button" type="button">添加第一个时间点</button>
             </div>
+          </section>
+        </section>
+
+        <section id="trendsView" class="trends-view hidden" aria-label="情绪趋势">
+          <header class="record-header trends-header">
+            <button id="trendsBackButton" class="back-button" type="button" aria-label="返回概览">‹</button>
+            <div class="record-heading">
+              <span class="eyebrow">独立维度</span>
+              <h2 id="trendPeriodTitle">今日趋势</h2>
+              <span id="trendCoverage">不计算总分</span>
+            </div>
+            <button id="trendSettingsButton" class="tool-button" type="button">分析设置</button>
+          </header>
+
+          <div class="trend-toolbar">
+            <div class="segmented-control" aria-label="趋势范围">
+              <button id="trendDayButton" class="segment active" type="button">单日</button>
+              <button id="trendWeekButton" class="segment" type="button">最近 7 天</button>
+            </div>
+            <div class="date-navigator">
+              <button id="trendPreviousButton" class="icon-button" type="button" aria-label="上一个时段">‹</button>
+              <input id="trendDateInput" type="date" aria-label="趋势结束日期" />
+              <button id="trendNextButton" class="icon-button" type="button" aria-label="下一个时段">›</button>
+              <button id="trendTodayButton" class="quiet-button" type="button">今天</button>
+            </div>
+          </div>
+
+          <div id="trendNoData" class="trend-notice hidden">当前时段没有可绘制的数值，文字活动仍会显示在下方。</div>
+          <section class="axis-chart-list" aria-label="三轴趋势图">
+            <article class="axis-chart">
+              <div class="axis-chart-heading"><div><strong>愉快</strong><span>效价 · 消极到积极</span></div><span id="valenceRangeLabel">-5 ～ 5</span></div>
+              <div class="chart-frame"><canvas id="valenceCanvas"></canvas></div>
+            </article>
+            <article class="axis-chart">
+              <div class="axis-chart-heading"><div><strong>能量</strong><span>精力性唤醒 · 疲惫到充沛</span></div><span id="energyRangeLabel">-5 ～ 5</span></div>
+              <div class="chart-frame"><canvas id="energyCanvas"></canvas></div>
+            </article>
+            <article class="axis-chart">
+              <div class="axis-chart-heading"><div><strong>焦虑</strong><span>紧张性唤醒 · 平静到紧张</span></div><span id="tensionRangeLabel">0 ～ 10</span></div>
+              <div class="chart-frame"><canvas id="tensionCanvas"></canvas></div>
+            </article>
+          </section>
+
+          <section class="context-section" aria-label="解释层">
+            <div class="section-heading"><div><span class="eyebrow">解释层</span><h3>反刍与活动</h3></div></div>
+            <div class="context-grid">
+              <article class="context-block"><strong>反刍轨道</strong><div id="ruminationTrack" class="track-list"></div></article>
+              <article class="context-block"><strong>活动事件</strong><div id="activityTrack" class="track-list"></div></article>
+            </div>
+          </section>
+
+          <section class="axis-chart pain-section" aria-label="腰痛趋势">
+            <div class="axis-chart-heading"><div><strong>腰痛</strong><span>身体状态，不计入情绪总分</span></div><span id="painRangeLabel">0 ～ 10</span></div>
+            <div class="chart-frame"><canvas id="painCanvas"></canvas></div>
           </section>
         </section>
       </main>
@@ -191,7 +273,23 @@
       </form>
     </dialog>
 
+    <dialog id="analyticsDialog" class="dialog analytics-dialog">
+      <form method="dialog" id="analyticsForm">
+        <div class="dialog-heading">
+          <span class="eyebrow">仅用于绘图</span>
+          <h2>分析设置</h2>
+        </div>
+        <p class="dialog-copy">设置每个指标在图表中的作用。这里不会修改模板列名或原始记录。</p>
+        <div id="analyticsList" class="analytics-list"></div>
+        <div class="dialog-actions">
+          <button class="quiet-button" id="cancelAnalyticsButton" type="button">取消</button>
+          <button class="primary-button" value="default" type="submit">保存设置</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=6" defer></script>
+    <script src="./assets/chart.umd.min.js?v=4.4.9" defer></script>
+    <script src="./app.js?v=7" defer></script>
   </body>
 </html>

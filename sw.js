@@ -1,13 +1,14 @@
-const CACHE_NAME = "mood-table-app-v6";
+const CACHE_NAME = "mood-table-app-v7-three-axis-20260701-r1";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=6",
-  "./app.js?v=6",
+  "./styles.css?v=7.1",
+  "./app.js?v=7",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
+  "./assets/chart.umd.min.js?v=4.4.9",
 ];
 
 self.addEventListener("install", (event) => {

@@ -5,6 +5,25 @@
     templates: "moodTable.templates",
     activeTemplateId: "moodTable.activeTemplateId",
     records: (templateId) => `moodTable.records.${templateId}`,
+    analytics: (templateId) => `moodTable.analytics.${templateId}`,
+  };
+
+  const APP_VERSION = "7";
+  const BACKUP_SCHEMA = "mood-table-backup";
+  const ROLE_OPTIONS = [
+    ["none", "不绘图"],
+    ["valence", "愉快（效价）"],
+    ["energeticArousal", "能量（精力性唤醒）"],
+    ["tenseArousal", "焦虑（紧张性唤醒）"],
+    ["rumination", "反刍轨道"],
+    ["activity", "活动事件"],
+    ["physical", "身体状态"],
+  ];
+  const AXIS_META = {
+    valence: { label: "愉快", color: "#287460", soft: "rgba(40,116,96,.16)" },
+    energeticArousal: { label: "能量", color: "#bf8522", soft: "rgba(191,133,34,.16)" },
+    tenseArousal: { label: "焦虑", color: "#d76f5c", soft: "rgba(215,111,92,.16)" },
+    physical: { label: "腰痛", color: "#4d78a8", soft: "rgba(77,120,168,.16)" },
   };
 
   const DEFAULT_COLUMNS = [
@@ -12,7 +31,7 @@
     "时间",
     "愉快",
     "能量",
-    "压力",
+    "焦虑",
     "腰痛",
     "反刍",
     "活动",
@@ -31,6 +50,9 @@
     importRows: [],
     importFileName: "",
     deferredInstallPrompt: null,
+    analytics: { version: 1, columns: {} },
+    trendMode: "day",
+    charts: {},
   };
 
   const els = {
@@ -52,6 +74,9 @@
     addColumnButton: document.getElementById("addColumnButton"),
     exportButton: document.getElementById("exportButton"),
     csvFileInput: document.getElementById("csvFileInput"),
+    analyticsButton: document.getElementById("analyticsButton"),
+    backupButton: document.getElementById("backupButton"),
+    backupFileInput: document.getElementById("backupFileInput"),
     searchInput: document.getElementById("searchInput"),
     clearSearchButton: document.getElementById("clearSearchButton"),
     overviewView: document.getElementById("overviewView"),
@@ -61,6 +86,13 @@
     summaryTitle: document.getElementById("summaryTitle"),
     overviewList: document.getElementById("overviewList"),
     overviewEmptyState: document.getElementById("overviewEmptyState"),
+    openTrendsButton: document.getElementById("openTrendsButton"),
+    miniValenceValue: document.getElementById("miniValenceValue"),
+    miniEnergyValue: document.getElementById("miniEnergyValue"),
+    miniTensionValue: document.getElementById("miniTensionValue"),
+    miniValenceCanvas: document.getElementById("miniValenceCanvas"),
+    miniEnergyCanvas: document.getElementById("miniEnergyCanvas"),
+    miniTensionCanvas: document.getElementById("miniTensionCanvas"),
     recordCount: document.getElementById("recordCount"),
     moodAverageLabel: document.getElementById("moodAverageLabel"),
     moodAverage: document.getElementById("moodAverage"),
@@ -80,6 +112,28 @@
     entryTableBody: document.getElementById("entryTableBody"),
     recordEmptyState: document.getElementById("recordEmptyState"),
     recordEmptyAddButton: document.getElementById("recordEmptyAddButton"),
+    trendsView: document.getElementById("trendsView"),
+    trendsBackButton: document.getElementById("trendsBackButton"),
+    trendSettingsButton: document.getElementById("trendSettingsButton"),
+    trendDayButton: document.getElementById("trendDayButton"),
+    trendWeekButton: document.getElementById("trendWeekButton"),
+    trendPreviousButton: document.getElementById("trendPreviousButton"),
+    trendDateInput: document.getElementById("trendDateInput"),
+    trendNextButton: document.getElementById("trendNextButton"),
+    trendTodayButton: document.getElementById("trendTodayButton"),
+    trendPeriodTitle: document.getElementById("trendPeriodTitle"),
+    trendCoverage: document.getElementById("trendCoverage"),
+    trendNoData: document.getElementById("trendNoData"),
+    valenceCanvas: document.getElementById("valenceCanvas"),
+    energyCanvas: document.getElementById("energyCanvas"),
+    tensionCanvas: document.getElementById("tensionCanvas"),
+    painCanvas: document.getElementById("painCanvas"),
+    valenceRangeLabel: document.getElementById("valenceRangeLabel"),
+    energyRangeLabel: document.getElementById("energyRangeLabel"),
+    tensionRangeLabel: document.getElementById("tensionRangeLabel"),
+    painRangeLabel: document.getElementById("painRangeLabel"),
+    ruminationTrack: document.getElementById("ruminationTrack"),
+    activityTrack: document.getElementById("activityTrack"),
     templateDialog: document.getElementById("templateDialog"),
     templateForm: document.getElementById("templateForm"),
     templateDialogTitle: document.getElementById("templateDialogTitle"),
@@ -90,6 +144,10 @@
     importForm: document.getElementById("importForm"),
     importSummary: document.getElementById("importSummary"),
     cancelImportButton: document.getElementById("cancelImportButton"),
+    analyticsDialog: document.getElementById("analyticsDialog"),
+    analyticsForm: document.getElementById("analyticsForm"),
+    analyticsList: document.getElementById("analyticsList"),
+    cancelAnalyticsButton: document.getElementById("cancelAnalyticsButton"),
     toast: document.getElementById("toast"),
   };
 
@@ -209,6 +267,65 @@
     return state.templates.find((template) => template.id === state.activeTemplateId) || state.templates[0];
   }
 
+  function inferAnalyticsForColumn(column) {
+    const name = String(column?.name || "").trim();
+    if (/愉快|正负性|效价/.test(name)) {
+      return { dataType: "number", role: "valence", min: -5, max: 5 };
+    }
+    if (/心情分数|情绪分数/.test(name)) {
+      return { dataType: "number", role: "valence", min: 1, max: 10 };
+    }
+    if (/能量|精力/.test(name)) {
+      return { dataType: "number", role: "energeticArousal", min: -5, max: 5 };
+    }
+    if (/焦虑|紧张/.test(name)) {
+      return { dataType: "number", role: "tenseArousal", min: 0, max: 10 };
+    }
+    if (/反刍/.test(name)) {
+      return {
+        dataType: "ordinal",
+        role: "rumination",
+        levels: ["无", "轻微", "有", "非常强"],
+      };
+    }
+    if (/活动|事件/.test(name)) {
+      return { dataType: "text", role: "activity" };
+    }
+    if (/腰痛|疼痛|疼|痛/.test(name)) {
+      return { dataType: "number", role: "physical", min: 0, max: 10 };
+    }
+    return { dataType: "text", role: "none" };
+  }
+
+  function reconcileAnalytics(config = state.analytics) {
+    const template = getActiveTemplate();
+    const next = { version: 1, columns: {} };
+    (template?.columns || []).forEach((column) => {
+      next.columns[column.id] = config?.columns?.[column.id] || inferAnalyticsForColumn(column);
+    });
+    return next;
+  }
+
+  function loadAnalytics() {
+    const stored = safeJsonParse(localStorage.getItem(STORAGE.analytics(state.activeTemplateId)), null);
+    state.analytics = reconcileAnalytics(stored);
+  }
+
+  function saveAnalytics() {
+    state.analytics = reconcileAnalytics(state.analytics);
+    localStorage.setItem(STORAGE.analytics(state.activeTemplateId), JSON.stringify(state.analytics));
+    markSaved();
+  }
+
+  function getColumnByRole(role) {
+    const template = getActiveTemplate();
+    return template?.columns.find((column) => state.analytics.columns[column.id]?.role === role);
+  }
+
+  function getAnalyticsSetting(columnId) {
+    return state.analytics.columns[columnId] || { dataType: "text", role: "none" };
+  }
+
   function loadApp() {
     state.templates = safeJsonParse(localStorage.getItem(STORAGE.templates), []);
     if (!Array.isArray(state.templates) || state.templates.length === 0) {
@@ -226,6 +343,7 @@
       state.activeTemplateId = state.templates[0].id;
     }
     loadRecords();
+    loadAnalytics();
   }
 
   function saveTemplates() {
@@ -240,9 +358,6 @@
   function loadRecords() {
     const records = safeJsonParse(localStorage.getItem(STORAGE.records(state.activeTemplateId)), []);
     state.records = Array.isArray(records) ? records : [];
-    if (migrateRecordDates()) {
-      localStorage.setItem(STORAGE.records(state.activeTemplateId), JSON.stringify(state.records));
-    }
   }
 
   function getDateColumn(template = getActiveTemplate()) {
@@ -279,18 +394,6 @@
       : todayDate();
   }
 
-  function migrateRecordDates() {
-    let changed = false;
-    state.records.forEach((record) => {
-      const pageDate = inferRecordDate(record);
-      if (record.pageDate !== pageDate) {
-        record.pageDate = pageDate;
-        changed = true;
-      }
-    });
-    return changed;
-  }
-
   function markSaved() {
     els.saveStatus.textContent = `已在本机保存 ${new Date().toLocaleTimeString("zh-CN", {
       hour: "2-digit",
@@ -304,6 +407,11 @@
     renderStats();
     renderOverviewSummary();
     renderRecordPage();
+    if (state.activeView === "overview") {
+      requestAnimationFrame(renderTrendPreview);
+    } else if (state.activeView === "trends") {
+      requestAnimationFrame(renderTrends);
+    }
   }
 
   function getScopedRecords() {
@@ -529,22 +637,37 @@
       records.forEach((record) => {
         const td = document.createElement("td");
         td.className = "entry-cell";
-        const input = document.createElement("input");
+        const setting = getAnalyticsSetting(column.id);
+        const input = document.createElement(setting.dataType === "ordinal" ? "select" : "input");
         input.className = "entry-input";
-        input.type = "text";
-        input.inputMode = inputModeFor(column.name);
-        input.enterKeyHint = metricIndex === metrics.length - 1 ? "done" : "next";
-        input.autocomplete = "off";
+        if (input.tagName === "SELECT") {
+          ["", ...(setting.levels || ["无", "轻微", "有", "非常强"])].forEach((level) => {
+            const option = document.createElement("option");
+            option.value = level;
+            option.textContent = level || "请选择";
+            input.append(option);
+          });
+        } else {
+          input.type = "text";
+          input.inputMode = setting.dataType === "number" ? "decimal" : inputModeFor(column.name);
+          input.enterKeyHint = metricIndex === metrics.length - 1 ? "done" : "next";
+          input.autocomplete = "off";
+          input.placeholder = setting.dataType === "number"
+            ? `${setting.min ?? ""} ～ ${setting.max ?? ""}`
+            : "填写内容";
+        }
         input.value = record.values?.[column.id] || "";
-        input.placeholder = input.inputMode === "decimal" ? "填写数值" : "填写内容";
         input.dataset.recordId = record.id;
         input.dataset.metricIndex = String(metricIndex);
         input.setAttribute("aria-label", `${column.name}，${recordTime(record, template) || "当前时间"}`);
-        input.addEventListener("input", () => {
+        const updateValue = () => {
           record.values[column.id] = input.value;
           record.updatedAt = nowIso();
+          updateInputValidity(input, setting);
           queueRecordSave();
-        });
+        };
+        input.addEventListener("input", updateValue);
+        input.addEventListener("change", updateValue);
         input.addEventListener("change", flushRecordSave);
         input.addEventListener("keydown", (event) => {
           if (event.key !== "Enter") {
@@ -558,6 +681,7 @@
             flushRecordSave();
           }
         });
+        updateInputValidity(input, setting);
         td.append(input);
         tr.append(td);
       });
@@ -567,6 +691,25 @@
     const isEmpty = records.length === 0;
     els.entryTable.classList.toggle("hidden", isEmpty);
     els.recordEmptyState.classList.toggle("hidden", !isEmpty);
+  }
+
+  function updateInputValidity(input, setting) {
+    if (setting.dataType !== "number" || !String(input.value).trim()) {
+      input.classList.remove("invalid-value");
+      input.removeAttribute("title");
+      return;
+    }
+    const value = Number(String(input.value).replace(",", "."));
+    const invalid =
+      !Number.isFinite(value) ||
+      (Number.isFinite(Number(setting.min)) && value < Number(setting.min)) ||
+      (Number.isFinite(Number(setting.max)) && value > Number(setting.max));
+    input.classList.toggle("invalid-value", invalid);
+    if (invalid) {
+      input.title = `绘图范围：${setting.min} ～ ${setting.max}。原始值仍会保存，但不会进入图表。`;
+    } else {
+      input.removeAttribute("title");
+    }
   }
 
   function renderStats() {
@@ -607,8 +750,10 @@
       state.viewMode = "day";
     }
     document.body.classList.toggle("record-mode", view === "record");
+    document.body.classList.toggle("trends-mode", view === "trends");
     els.overviewView.classList.toggle("hidden", view !== "overview");
     els.recordView.classList.toggle("hidden", view !== "record");
+    els.trendsView.classList.toggle("hidden", view !== "trends");
     render();
   }
 
@@ -662,6 +807,7 @@
     }
     const column = { id: uid("col"), name: uniqueColumnName(name.trim(), template.columns) };
     template.columns.push(column);
+    state.analytics.columns[column.id] = inferAnalyticsForColumn(column);
     template.updatedAt = nowIso();
     state.records.forEach((record) => {
       record.values[column.id] = "";
@@ -669,6 +815,7 @@
     });
     saveTemplates();
     saveRecords();
+    saveAnalytics();
     render();
     showToast("已添加列");
   }
@@ -686,6 +833,10 @@
       return;
     }
     column.name = uniqueColumnName(cleanName, template.columns.filter((item) => item.id !== columnId));
+    if (getAnalyticsSetting(columnId).role === "none") {
+      state.analytics.columns[columnId] = inferAnalyticsForColumn(column);
+      saveAnalytics();
+    }
     template.updatedAt = nowIso();
     saveTemplates();
     render();
@@ -703,6 +854,7 @@
       return;
     }
     template.columns = template.columns.filter((item) => item.id !== columnId);
+    delete state.analytics.columns[columnId];
     template.updatedAt = nowIso();
     state.records.forEach((record) => {
       delete record.values[columnId];
@@ -713,6 +865,7 @@
     }
     saveTemplates();
     saveRecords();
+    saveAnalytics();
     render();
     showToast("列已删除");
   }
@@ -766,9 +919,11 @@
       state.templates.push(template);
       state.activeTemplateId = template.id;
       state.records = [];
+      state.analytics = reconcileAnalytics({ version: 1, columns: {} });
       saveTemplates();
       localStorage.setItem(STORAGE.activeTemplateId, template.id);
       saveRecords();
+      saveAnalytics();
       render();
       showToast("模板已创建");
       return true;
@@ -796,9 +951,11 @@
     });
     template.name = name;
     template.columns = nextColumns;
+    state.analytics = reconcileAnalytics(state.analytics);
     template.updatedAt = nowIso();
     saveTemplates();
     saveRecords();
+    saveAnalytics();
     render();
     showToast("模板已更新");
     return true;
@@ -815,10 +972,12 @@
     }
     state.templates = state.templates.filter((item) => item.id !== template.id);
     localStorage.removeItem(STORAGE.records(template.id));
+    localStorage.removeItem(STORAGE.analytics(template.id));
     state.activeTemplateId = state.templates[0].id;
     localStorage.setItem(STORAGE.activeTemplateId, state.activeTemplateId);
     saveTemplates();
     loadRecords();
+    loadAnalytics();
     render();
     showToast("模板已删除");
   }
@@ -1008,11 +1167,420 @@
 
     state.records = mode === "replace" ? importedRecords : [...state.records, ...importedRecords];
     template.updatedAt = nowIso();
+    state.analytics = reconcileAnalytics(state.analytics);
     saveTemplates();
     saveRecords();
+    saveAnalytics();
     render();
     showToast(mode === "replace" ? "CSV 已覆盖导入" : "CSV 已追加导入");
     return true;
+  }
+
+  function openAnalyticsDialog() {
+    const template = getActiveTemplate();
+    els.analyticsList.innerHTML = "";
+    getMetricColumns(template).forEach((column) => {
+      const setting = getAnalyticsSetting(column.id);
+      const row = document.createElement("div");
+      row.className = "analytics-row";
+      row.dataset.columnId = column.id;
+
+      const name = document.createElement("strong");
+      name.textContent = column.name;
+      const role = document.createElement("select");
+      role.className = "analytics-role";
+      role.setAttribute("aria-label", `${column.name}的图表作用`);
+      ROLE_OPTIONS.forEach(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        option.selected = setting.role === value;
+        role.append(option);
+      });
+
+      const range = document.createElement("div");
+      range.className = "analytics-range";
+      const min = document.createElement("input");
+      min.className = "analytics-min";
+      min.type = "number";
+      min.step = "any";
+      min.value = setting.min ?? "";
+      min.placeholder = "最小";
+      const max = document.createElement("input");
+      max.className = "analytics-max";
+      max.type = "number";
+      max.step = "any";
+      max.value = setting.max ?? "";
+      max.placeholder = "最大";
+      range.append(min, max);
+
+      const toggleRange = () => {
+        const numeric = ["valence", "energeticArousal", "tenseArousal", "physical"].includes(role.value);
+        range.classList.toggle("hidden", !numeric);
+      };
+      role.addEventListener("change", toggleRange);
+      toggleRange();
+      row.append(name, role, range);
+      els.analyticsList.append(row);
+    });
+    els.analyticsDialog.showModal();
+  }
+
+  function saveAnalyticsFromDialog() {
+    const next = { version: 1, columns: { ...state.analytics.columns } };
+    const used = new Set();
+    for (const row of els.analyticsList.querySelectorAll(".analytics-row")) {
+      const columnId = row.dataset.columnId;
+      const role = row.querySelector(".analytics-role").value;
+      if (role !== "none" && used.has(role)) {
+        showToast("每种图表作用只能选择一个指标");
+        return false;
+      }
+      if (role !== "none") used.add(role);
+      if (role === "rumination") {
+        next.columns[columnId] = {
+          dataType: "ordinal",
+          role,
+          levels: ["无", "轻微", "有", "非常强"],
+        };
+      } else if (role === "activity" || role === "none") {
+        next.columns[columnId] = { dataType: "text", role };
+      } else {
+        const min = Number(row.querySelector(".analytics-min").value);
+        const max = Number(row.querySelector(".analytics-max").value);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+          showToast("数值指标需要填写有效的最小值和最大值");
+          return false;
+        }
+        next.columns[columnId] = { dataType: "number", role, min, max };
+      }
+    }
+    state.analytics = next;
+    saveAnalytics();
+    render();
+    showToast("分析设置已保存");
+    return true;
+  }
+
+  function exportFullBackup() {
+    flushRecordSave();
+    const recordsByTemplate = {};
+    const analyticsByTemplate = {};
+    state.templates.forEach((template) => {
+      const records = safeJsonParse(localStorage.getItem(STORAGE.records(template.id)), []);
+      const analytics = safeJsonParse(localStorage.getItem(STORAGE.analytics(template.id)), null);
+      recordsByTemplate[template.id] = Array.isArray(records) ? records : [];
+      analyticsByTemplate[template.id] = analytics || (
+        template.id === state.activeTemplateId ? state.analytics : { version: 1, columns: {} }
+      );
+    });
+    const backup = {
+      schema: BACKUP_SCHEMA,
+      version: 1,
+      appVersion: APP_VERSION,
+      exportedAt: nowIso(),
+      templates: state.templates,
+      activeTemplateId: state.activeTemplateId,
+      recordsByTemplate,
+      analyticsByTemplate,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" });
+    const anchor = document.createElement("a");
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = `心情表格_完整备份_${todayDate()}.json`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(anchor.href);
+    showToast("完整备份已导出，请妥善保存");
+  }
+
+  function validateBackup(backup) {
+    if (!backup || backup.schema !== BACKUP_SCHEMA || backup.version !== 1) return "不是受支持的心情表格备份";
+    if (!Array.isArray(backup.templates) || backup.templates.length === 0) return "备份中没有模板";
+    const ids = new Set();
+    for (const template of backup.templates) {
+      if (!template?.id || !template?.name || !Array.isArray(template.columns)) return "模板结构不完整";
+      if (ids.has(template.id)) return "备份中有重复模板";
+      ids.add(template.id);
+      if (!template.columns.every((column) => column?.id && typeof column.name === "string")) return "模板列结构不完整";
+      if (!Array.isArray(backup.recordsByTemplate?.[template.id])) return "记录结构不完整";
+    }
+    if (!ids.has(backup.activeTemplateId)) return "当前模板无效";
+    return "";
+  }
+
+  async function restoreFullBackup(file) {
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text());
+      const error = validateBackup(backup);
+      if (error) {
+        showToast(error);
+        return;
+      }
+      const recordCount = backup.templates.reduce(
+        (sum, template) => sum + backup.recordsByTemplate[template.id].length,
+        0
+      );
+      if (!confirm(`恢复 ${backup.templates.length} 个模板、${recordCount} 条记录？这会覆盖本机现有的心情表格数据。`)) {
+        return;
+      }
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith("moodTable.records.") || key.startsWith("moodTable.analytics."))
+        .forEach((key) => localStorage.removeItem(key));
+      localStorage.setItem(STORAGE.templates, JSON.stringify(backup.templates));
+      localStorage.setItem(STORAGE.activeTemplateId, backup.activeTemplateId);
+      backup.templates.forEach((template) => {
+        localStorage.setItem(
+          STORAGE.records(template.id),
+          JSON.stringify(backup.recordsByTemplate[template.id])
+        );
+        const analytics = backup.analyticsByTemplate?.[template.id];
+        if (analytics) {
+          localStorage.setItem(STORAGE.analytics(template.id), JSON.stringify(analytics));
+        }
+      });
+      loadApp();
+      switchView("overview");
+      showToast("完整备份已恢复");
+    } catch (error) {
+      console.error(error);
+      showToast("备份文件无法读取");
+    } finally {
+      els.backupFileInput.value = "";
+    }
+  }
+
+  function dateValues(endDate, days) {
+    const end = dateFromValue(endDate);
+    return Array.from({ length: days }, (_, index) => {
+      const date = new Date(end);
+      date.setDate(end.getDate() - (days - 1 - index));
+      return formatLocalDate(date);
+    });
+  }
+
+  function numericValue(record, role) {
+    const column = getColumnByRole(role);
+    if (!column) return null;
+    const setting = getAnalyticsSetting(column.id);
+    const value = Number(String(record.values?.[column.id] ?? "").replace(",", "."));
+    if (!Number.isFinite(value)) return null;
+    if (Number.isFinite(Number(setting.min)) && value < Number(setting.min)) return null;
+    if (Number.isFinite(Number(setting.max)) && value > Number(setting.max)) return null;
+    return value;
+  }
+
+  function aggregateRole(role, dates) {
+    return dates.map((date) => {
+      const values = state.records
+        .filter((record) => inferRecordDate(record) === date)
+        .map((record) => numericValue(record, role))
+        .filter((value) => value !== null);
+      return values.length
+        ? {
+            mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+            min: Math.min(...values),
+            max: Math.max(...values),
+          }
+        : null;
+    });
+  }
+
+  function destroyChart(key) {
+    if (state.charts[key]) {
+      state.charts[key].destroy();
+      delete state.charts[key];
+    }
+  }
+
+  function baseChartOptions(setting, compact = false) {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: !compact },
+      },
+      scales: compact
+        ? { x: { display: false }, y: { display: false, min: setting.min, max: setting.max } }
+        : {
+            x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true } },
+            y: {
+              min: setting.min,
+              max: setting.max,
+              ticks: { precision: 1 },
+              grid: { color: "rgba(23,33,30,.08)" },
+            },
+          },
+    };
+  }
+
+  function makeLineChart(key, canvas, labels, values, role, compact = false) {
+    destroyChart(key);
+    if (!canvas || typeof Chart === "undefined") return;
+    const column = getColumnByRole(role);
+    const setting = column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 };
+    const meta = AXIS_META[role];
+    state.charts[key] = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          borderColor: meta.color,
+          backgroundColor: meta.soft,
+          borderWidth: compact ? 2 : 2.5,
+          pointRadius: compact ? 0 : 3,
+          pointHoverRadius: 5,
+          tension: 0.28,
+          spanGaps: false,
+          fill: compact,
+        }],
+      },
+      options: baseChartOptions(setting, compact),
+    });
+  }
+
+  function makeRangeChart(key, canvas, labels, aggregates, role) {
+    destroyChart(key);
+    if (!canvas || typeof Chart === "undefined") return;
+    const column = getColumnByRole(role);
+    const setting = column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 };
+    const meta = AXIS_META[role];
+    state.charts[key] = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            data: aggregates.map((item) => item?.max ?? null),
+            borderColor: "transparent",
+            pointRadius: 0,
+          },
+          {
+            data: aggregates.map((item) => item?.min ?? null),
+            borderColor: "transparent",
+            backgroundColor: meta.soft,
+            pointRadius: 0,
+            fill: "-1",
+          },
+          {
+            data: aggregates.map((item) => item?.mean ?? null),
+            borderColor: meta.color,
+            backgroundColor: meta.color,
+            borderWidth: 2.5,
+            pointRadius: 3,
+            tension: 0.25,
+          },
+        ],
+      },
+      options: baseChartOptions(setting, false),
+    });
+  }
+
+  function renderTrendPreview() {
+    if (typeof Chart === "undefined") return;
+    const dates = dateValues(state.selectedDate, 7);
+    const labels = dates.map((date) => date.slice(5));
+    [
+      ["valence", "miniValence", els.miniValenceCanvas, els.miniValenceValue],
+      ["energeticArousal", "miniEnergy", els.miniEnergyCanvas, els.miniEnergyValue],
+      ["tenseArousal", "miniTension", els.miniTensionCanvas, els.miniTensionValue],
+    ].forEach(([role, key, canvas, valueElement]) => {
+      const aggregates = aggregateRole(role, dates);
+      const values = aggregates.map((item) => item?.mean ?? null);
+      const latest = [...values].reverse().find((value) => value !== null);
+      valueElement.textContent = latest === undefined ? "-" : latest.toFixed(1);
+      makeLineChart(key, canvas, labels, values, role, true);
+    });
+  }
+
+  function dailyRoleData(role) {
+    return state.records
+      .filter((record) => inferRecordDate(record) === state.selectedDate)
+      .map((record) => ({ label: recordTime(record) || "--:--", value: numericValue(record, role) }))
+      .filter((item) => item.value !== null)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  function renderRoleChart(role, key, canvas) {
+    if (state.trendMode === "week") {
+      const dates = dateValues(state.selectedDate, 7);
+      makeRangeChart(key, canvas, dates.map((date) => date.slice(5)), aggregateRole(role, dates), role);
+      return aggregateRole(role, dates).some(Boolean);
+    }
+    const points = dailyRoleData(role);
+    makeLineChart(key, canvas, points.map((point) => point.label), points.map((point) => point.value), role);
+    return points.length > 0;
+  }
+
+  function renderContextTrack(element, role, dates) {
+    element.innerHTML = "";
+    const column = getColumnByRole(role);
+    const setting = column ? getAnalyticsSetting(column.id) : null;
+    const entries = [];
+    if (column) {
+      state.records
+        .filter((record) => dates.includes(inferRecordDate(record)))
+        .forEach((record) => {
+          const value = String(record.values?.[column.id] || "").trim();
+          if (!value) return;
+          entries.push({
+            date: inferRecordDate(record),
+            time: recordTime(record) || "--:--",
+            value,
+            level: setting?.levels?.indexOf(value) ?? -1,
+          });
+        });
+    }
+    entries.sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
+    entries.forEach((entry) => {
+      const item = document.createElement("span");
+      item.className = `track-item${role === "rumination" ? ` level-${Math.max(entry.level, 0)}` : ""}`;
+      const prefix = state.trendMode === "week" ? `${entry.date.slice(5)} ${entry.time}` : entry.time;
+      item.textContent = `${prefix} · ${entry.value}`;
+      element.append(item);
+    });
+    if (entries.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "track-empty";
+      empty.textContent = role === "rumination" ? "暂无反刍记录" : "暂无活动事件";
+      element.append(empty);
+    }
+  }
+
+  function renderTrends() {
+    const dates = state.trendMode === "week" ? dateValues(state.selectedDate, 7) : [state.selectedDate];
+    els.trendDateInput.value = state.selectedDate;
+    els.trendDayButton.classList.toggle("active", state.trendMode === "day");
+    els.trendWeekButton.classList.toggle("active", state.trendMode === "week");
+    els.trendPeriodTitle.textContent = state.trendMode === "day"
+      ? formatDateTitle(state.selectedDate)
+      : `${dates[0].slice(5)} 至 ${dates[6].slice(5)}`;
+    els.trendCoverage.textContent = state.trendMode === "week"
+      ? "折线为日均，阴影为当天最低至最高"
+      : "共用时间轴，三个维度独立显示";
+
+    const chartMap = [
+      ["valence", "valence", els.valenceCanvas, els.valenceRangeLabel],
+      ["energeticArousal", "energy", els.energyCanvas, els.energyRangeLabel],
+      ["tenseArousal", "tension", els.tensionCanvas, els.tensionRangeLabel],
+      ["physical", "pain", els.painCanvas, els.painRangeLabel],
+    ];
+    let hasData = false;
+    chartMap.forEach(([role, key, canvas, rangeLabel]) => {
+      const column = getColumnByRole(role);
+      const setting = column ? getAnalyticsSetting(column.id) : null;
+      rangeLabel.textContent = setting ? `${setting.min} ～ ${setting.max}` : "未设置";
+      hasData = renderRoleChart(role, key, canvas) || hasData;
+    });
+    els.trendNoData.classList.toggle("hidden", hasData);
+    renderContextTrack(els.ruminationTrack, "rumination", dates);
+    renderContextTrack(els.activityTrack, "activity", dates);
   }
 
   function showToast(message) {
@@ -1073,6 +1641,7 @@
       localStorage.setItem(STORAGE.activeTemplateId, state.activeTemplateId);
       state.sort = { columnId: "", direction: "" };
       loadRecords();
+      loadAnalytics();
       render();
     });
 
@@ -1084,6 +1653,37 @@
     els.addColumnButton.addEventListener("click", addColumn);
     els.exportButton.addEventListener("click", exportCsv);
     els.csvFileInput.addEventListener("change", (event) => onCsvFileSelected(event.target.files[0]));
+    els.analyticsButton.addEventListener("click", openAnalyticsDialog);
+    els.trendSettingsButton.addEventListener("click", openAnalyticsDialog);
+    els.backupButton.addEventListener("click", exportFullBackup);
+    els.backupFileInput.addEventListener("change", (event) => restoreFullBackup(event.target.files[0]));
+    els.openTrendsButton.addEventListener("click", () => switchView("trends"));
+    els.trendsBackButton.addEventListener("click", () => switchView("overview"));
+    els.trendDayButton.addEventListener("click", () => {
+      state.trendMode = "day";
+      render();
+    });
+    els.trendWeekButton.addEventListener("click", () => {
+      state.trendMode = "week";
+      render();
+    });
+    els.trendPreviousButton.addEventListener("click", () =>
+      shiftSelectedDate(state.trendMode === "week" ? -7 : -1)
+    );
+    els.trendNextButton.addEventListener("click", () =>
+      shiftSelectedDate(state.trendMode === "week" ? 7 : 1)
+    );
+    els.trendTodayButton.addEventListener("click", () => {
+      state.selectedDate = todayDate();
+      render();
+    });
+    els.trendDateInput.addEventListener("change", () => {
+      const date = normalizeDateValue(els.trendDateInput.value);
+      if (date) {
+        state.selectedDate = date;
+        render();
+      }
+    });
     els.searchInput.addEventListener("input", () => {
       state.search = els.searchInput.value;
       renderOverviewSummary();
@@ -1117,6 +1717,13 @@
       state.importFileName = "";
       els.importDialog.close();
     });
+    els.analyticsForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (saveAnalyticsFromDialog()) {
+        els.analyticsDialog.close();
+      }
+    });
+    els.cancelAnalyticsButton.addEventListener("click", () => els.analyticsDialog.close());
 
     window.addEventListener("beforeinstallprompt", (event) => {
       event.preventDefault();

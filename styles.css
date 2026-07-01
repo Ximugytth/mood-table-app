@@ -757,6 +757,257 @@ textarea {
   clip-path: inset(50%);
 }
 
+.trend-preview {
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.mini-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mini-chart-item {
+  min-width: 0;
+  height: 142px;
+  border-right: 1px solid var(--soft-line);
+  padding: 12px 14px;
+}
+
+.mini-chart-item:last-child {
+  border-right: 0;
+}
+
+.mini-chart-item > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mini-chart-item span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mini-chart-item strong {
+  font-size: 20px;
+}
+
+.mini-chart-item canvas {
+  width: 100% !important;
+  height: 86px !important;
+}
+
+.trends-mode .app-shell {
+  width: 100%;
+  padding: 0;
+}
+
+.trends-mode .topbar,
+.trends-mode .overview-view {
+  display: none;
+}
+
+.trends-view {
+  min-height: 100dvh;
+  background: var(--bg);
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+}
+
+.trends-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.trend-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  padding: 10px 16px;
+}
+
+.trend-notice {
+  margin: 14px auto 0;
+  width: min(1040px, calc(100% - 28px));
+  border: 1px solid #e7d19f;
+  border-radius: var(--radius);
+  color: #72551e;
+  background: var(--gold-soft);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.axis-chart-list,
+.context-section,
+.pain-section {
+  width: min(1040px, calc(100% - 28px));
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.axis-chart-list {
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.axis-chart {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.axis-chart-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--soft-line);
+  padding: 12px 14px;
+}
+
+.axis-chart-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.axis-chart-heading strong {
+  font-size: 16px;
+}
+
+.axis-chart-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chart-frame {
+  position: relative;
+  height: 230px;
+  padding: 10px 12px 8px;
+}
+
+.chart-frame canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.context-section {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.context-block {
+  min-width: 0;
+  padding: 14px;
+}
+
+.context-block:first-child {
+  border-right: 1px solid var(--soft-line);
+}
+
+.context-block > strong {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.track-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.track-item,
+.track-empty {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f7faf9;
+  padding: 6px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.track-item.level-1 {
+  border-color: #d8c99b;
+  background: #fff8e5;
+}
+
+.track-item.level-2 {
+  border-color: #e5b6a5;
+  background: #fff0ea;
+}
+
+.track-item.level-3 {
+  border-color: #d99090;
+  color: #863838;
+  background: #faeaea;
+}
+
+.pain-section {
+  margin-top: 12px;
+}
+
+.analytics-dialog {
+  width: min(720px, calc(100% - 28px));
+}
+
+.analytics-list {
+  display: grid;
+  max-height: min(56vh, 520px);
+  border-top: 1px solid var(--line);
+  overflow: auto;
+}
+
+.analytics-row {
+  display: grid;
+  grid-template-columns: minmax(92px, 1fr) minmax(180px, 1.5fr) minmax(150px, 1fr);
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid var(--soft-line);
+  padding: 10px 0;
+}
+
+.analytics-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.analytics-range input {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 8px;
+}
+
+.entry-input.invalid-value {
+  color: var(--danger);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px #e8aaaa;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     padding: 12px 10px 24px;
@@ -794,7 +1045,7 @@ textarea {
   .search-row,
   .action-grid,
   .stats-strip {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .template-row .field-label,
@@ -814,6 +1065,11 @@ textarea {
 
   .summary-item:nth-child(odd) {
     border-right: 0;
+  }
+
+  .trend-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
@@ -838,7 +1094,7 @@ textarea {
   }
 
   .template-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .template-row #deleteTemplateButton {
@@ -900,5 +1156,60 @@ textarea {
 
   .entry-input {
     font-size: 16px;
+  }
+
+  .mini-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mini-chart-item {
+    height: 116px;
+    border-right: 0;
+    border-bottom: 1px solid var(--soft-line);
+  }
+
+  .mini-chart-item:last-child {
+    border-bottom: 0;
+  }
+
+  .mini-chart-item canvas {
+    height: 70px !important;
+  }
+
+  .trends-header {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+  }
+
+  .trends-header .tool-button {
+    padding: 0 8px;
+  }
+
+  .trend-toolbar .date-navigator {
+    grid-template-columns: 40px minmax(130px, 1fr) 40px auto;
+  }
+
+  .axis-chart-list,
+  .context-section,
+  .pain-section {
+    width: calc(100% - 20px);
+  }
+
+  .chart-frame {
+    height: 210px;
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .context-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .context-block:first-child {
+    border-right: 0;
+    border-bottom: 1px solid var(--soft-line);
+  }
+
+  .analytics-row {
+    grid-template-columns: 1fr;
   }
 }

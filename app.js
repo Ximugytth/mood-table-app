@@ -8,13 +8,13 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "7.4";
+  const APP_VERSION = "8.1";
   const BACKUP_SCHEMA = "mood-table-backup";
   const ROLE_OPTIONS = [
     ["none", "不绘图"],
     ["valence", "愉快（效价）"],
     ["energeticArousal", "能量（精力性唤醒）"],
-    ["tenseArousal", "焦虑（紧张性唤醒）"],
+    ["tenseArousal", "紧张担忧（紧张性唤醒）"],
     ["rumination", "反刍轨道"],
     ["activity", "活动事件"],
     ["physical", "身体状态"],
@@ -22,8 +22,9 @@
   const AXIS_META = {
     valence: { label: "愉快", color: "#287460", soft: "rgba(40,116,96,.16)" },
     energeticArousal: { label: "能量", color: "#bf8522", soft: "rgba(191,133,34,.16)" },
-    tenseArousal: { label: "焦虑", color: "#d76f5c", soft: "rgba(215,111,92,.16)" },
+    tenseArousal: { label: "紧张担忧", color: "#d76f5c", soft: "rgba(215,111,92,.16)" },
     physical: { label: "腰痛", color: "#4d78a8", soft: "rgba(77,120,168,.16)" },
+    state: { label: "状态指数", color: "#2e6657", soft: "rgba(46,102,87,.16)" },
   };
 
   const DEFAULT_COLUMNS = [
@@ -31,7 +32,7 @@
     "时间",
     "愉快",
     "能量",
-    "焦虑",
+    "紧张担忧",
     "腰痛",
     "反刍",
     "活动",
@@ -50,8 +51,9 @@
     importRows: [],
     importFileName: "",
     deferredInstallPrompt: null,
-    analytics: { version: 1, columns: {} },
+    analytics: { version: 1, columns: {}, scaleMode: "personal" },
     trendMode: "day",
+    overviewScale: 7,
     charts: {},
   };
 
@@ -94,6 +96,13 @@
     miniValenceCanvas: document.getElementById("miniValenceCanvas"),
     miniEnergyCanvas: document.getElementById("miniEnergyCanvas"),
     miniTensionCanvas: document.getElementById("miniTensionCanvas"),
+    stateScale7Button: document.getElementById("stateScale7Button"),
+    stateScale14Button: document.getElementById("stateScale14Button"),
+    stateScale56Button: document.getElementById("stateScale56Button"),
+    overviewStateScore: document.getElementById("overviewStateScore"),
+    overviewStateDelta: document.getElementById("overviewStateDelta"),
+    overviewStateCoverage: document.getElementById("overviewStateCoverage"),
+    overviewStateCanvas: document.getElementById("overviewStateCanvas"),
     recordCount: document.getElementById("recordCount"),
     moodAverageLabel: document.getElementById("moodAverageLabel"),
     moodAverage: document.getElementById("moodAverage"),
@@ -118,6 +127,10 @@
     trendSettingsButton: document.getElementById("trendSettingsButton"),
     trendDayButton: document.getElementById("trendDayButton"),
     trendWeekButton: document.getElementById("trendWeekButton"),
+    trendFortnightButton: document.getElementById("trendFortnightButton"),
+    trendCourseButton: document.getElementById("trendCourseButton"),
+    personalScaleButton: document.getElementById("personalScaleButton"),
+    fixedScaleButton: document.getElementById("fixedScaleButton"),
     trendPreviousButton: document.getElementById("trendPreviousButton"),
     trendDateInput: document.getElementById("trendDateInput"),
     trendNextButton: document.getElementById("trendNextButton"),
@@ -125,6 +138,10 @@
     trendPeriodTitle: document.getElementById("trendPeriodTitle"),
     trendCoverage: document.getElementById("trendCoverage"),
     trendNoData: document.getElementById("trendNoData"),
+    trendStateScore: document.getElementById("trendStateScore"),
+    trendStateDelta: document.getElementById("trendStateDelta"),
+    trendStateSummary: document.getElementById("trendStateSummary"),
+    stateCanvas: document.getElementById("stateCanvas"),
     valenceCanvas: document.getElementById("valenceCanvas"),
     energyCanvas: document.getElementById("energyCanvas"),
     tensionCanvas: document.getElementById("tensionCanvas"),
@@ -318,7 +335,11 @@
 
   function reconcileAnalytics(config = state.analytics) {
     const template = getActiveTemplate();
-    const next = { version: 1, columns: {} };
+    const next = {
+      version: 2,
+      columns: {},
+      scaleMode: config?.scaleMode === "fixed" ? "fixed" : "personal",
+    };
     (template?.columns || []).forEach((column) => {
       next.columns[column.id] = config?.columns?.[column.id] || inferAnalyticsForColumn(column);
     });
@@ -446,7 +467,10 @@
     renderOverviewSummary();
     renderRecordPage();
     if (state.activeView === "overview") {
-      requestAnimationFrame(renderTrendPreview);
+      requestAnimationFrame(() => {
+        renderStateOverview();
+        renderTrendPreview();
+      });
     } else if (state.activeView === "trends") {
       requestAnimationFrame(renderTrends);
     }
@@ -1318,7 +1342,11 @@
   }
 
   function saveAnalyticsFromDialog() {
-    const next = { version: 1, columns: { ...state.analytics.columns } };
+    const next = {
+      version: 2,
+      columns: { ...state.analytics.columns },
+      scaleMode: state.analytics.scaleMode,
+    };
     const used = new Set();
     for (const row of els.analyticsList.querySelectorAll(".analytics-row")) {
       const columnId = row.dataset.columnId;
@@ -1496,6 +1524,157 @@
     });
   }
 
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function ruminationValue(record) {
+    const column = getColumnByRole("rumination");
+    if (!column) return null;
+    const setting = getAnalyticsSetting(column.id);
+    const levels = setting.levels || ["无", "轻微", "有", "非常强"];
+    const raw = String(record.values?.[column.id] ?? "").trim();
+    if (!raw) return null;
+    const index = levels.indexOf(raw);
+    return index >= 0 ? index : null;
+  }
+
+  function stateValue(record) {
+    const valence = numericValue(record, "valence");
+    const tension = numericValue(record, "tenseArousal");
+    if (valence === null || tension === null) {
+      return null;
+    }
+    const energy = numericValue(record, "energeticArousal");
+    const rumination = ruminationValue(record);
+    const pain = numericValue(record, "physical");
+    const parts = [
+      { key: "valence", weight: 0.45, value: clamp(((valence + 5) / 10) * 100, 0, 100) },
+      { key: "calm", weight: 0.30, value: clamp(((10 - tension) / 10) * 100, 0, 100) },
+      {
+        key: "energy",
+        weight: 0.10,
+        value: energy === null ? null : clamp(((energy + 5) / 10) * 100, 0, 100),
+      },
+      {
+        key: "rumination",
+        weight: 0.10,
+        value: rumination === null ? null : clamp(((3 - rumination) / 3) * 100, 0, 100),
+      },
+      {
+        key: "comfort",
+        weight: 0.05,
+        value: pain === null ? null : clamp(((10 - pain) / 10) * 100, 0, 100),
+      },
+    ];
+    const available = parts.filter((part) => part.value !== null);
+    const usedWeight = available.reduce((sum, part) => sum + part.weight, 0);
+    if (usedWeight <= 0) return null;
+    const score = available.reduce(
+      (sum, part) => sum + part.value * part.weight,
+      0
+    ) / usedWeight;
+    return {
+      score,
+      coverage: usedWeight,
+      parts,
+    };
+  }
+
+  function timeBucket(record) {
+    const match = recordTime(record).match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return "unknown";
+    const minutes = Number(match[1]) * 60 + Number(match[2]);
+    if (minutes >= 5 * 60 && minutes < 12 * 60) return "morning";
+    if (minutes >= 12 * 60 && minutes < 14 * 60) return "noon";
+    if (minutes >= 14 * 60 && minutes < 18 * 60) return "afternoon";
+    return "evening";
+  }
+
+  function meanFinite(values) {
+    const finite = values.filter((value) => Number.isFinite(value));
+    return finite.length
+      ? finite.reduce((sum, value) => sum + value, 0) / finite.length
+      : null;
+  }
+
+  function dailyState(date) {
+    const buckets = new Map();
+    state.records
+      .filter((record) => inferRecordDate(record) === date)
+      .forEach((record) => {
+        const value = stateValue(record);
+        if (!value) return;
+        const bucket = timeBucket(record);
+        if (!buckets.has(bucket)) buckets.set(bucket, []);
+        buckets.get(bucket).push(value);
+      });
+    const bucketScores = [];
+    const bucketCoverage = [];
+    buckets.forEach((values) => {
+      bucketScores.push(meanFinite(values.map((value) => value.score)));
+      bucketCoverage.push(meanFinite(values.map((value) => value.coverage)));
+    });
+    const score = meanFinite(bucketScores);
+    if (score === null) return null;
+    return {
+      date,
+      score,
+      coverage: meanFinite(bucketCoverage) || 0,
+      periods: buckets.size,
+    };
+  }
+
+  function stateWindow(endDate, days) {
+    const dates = dateValues(endDate, days);
+    return dates.map((date) => dailyState(date));
+  }
+
+  function stateWindowSummary(endDate, days) {
+    const daily = stateWindow(endDate, days);
+    const valid = daily.filter(Boolean);
+    const score = meanFinite(valid.map((item) => item.score));
+    let earlyDays;
+    let lateDays;
+    if (days >= 56) {
+      earlyDays = daily.slice(0, 14);
+      lateDays = daily.slice(-14);
+    } else if (days >= 14) {
+      earlyDays = daily.slice(0, 7);
+      lateDays = daily.slice(-7);
+    } else {
+      earlyDays = daily.slice(0, 3);
+      lateDays = daily.slice(-3);
+    }
+    const early = meanFinite(earlyDays.filter(Boolean).map((item) => item.score));
+    const late = meanFinite(lateDays.filter(Boolean).map((item) => item.score));
+    return {
+      days,
+      daily,
+      valid,
+      score,
+      delta: early === null || late === null ? null : late - early,
+      coverage: meanFinite(valid.map((item) => item.coverage)),
+    };
+  }
+
+  function rollingStateValues(daily, windowDays = 14) {
+    return daily.map((item, index) => {
+      const values = daily
+        .slice(Math.max(0, index - windowDays + 1), index + 1)
+        .filter(Boolean)
+        .map((entry) => entry.score);
+      return values.length >= 3 ? meanFinite(values) : null;
+    });
+  }
+
+  function momentaryStateTimeline() {
+    return dailyTimeline().map((item) => ({
+      ...item,
+      state: stateValue(item.record),
+    }));
+  }
+
   function destroyChart(key) {
     if (state.charts[key]) {
       state.charts[key].destroy();
@@ -1503,25 +1682,66 @@
     }
   }
 
-  function chartDomain(setting, values) {
-    const finiteValues = values.filter((value) => Number.isFinite(value));
-    let min = Number.isFinite(Number(setting.min)) ? Number(setting.min) : Math.min(...finiteValues);
-    let max = Number.isFinite(Number(setting.max)) ? Number(setting.max) : Math.max(...finiteValues);
-    if (finiteValues.length > 0) {
-      min = Math.min(min, ...finiteValues);
-      max = Math.max(max, ...finiteValues);
+  function recentPersonalValues(role) {
+    const dates = dateValues(state.selectedDate, 14);
+    if (role === "state") {
+      return stateWindow(state.selectedDate, 14)
+        .filter(Boolean)
+        .map((item) => ({ date: item.date, value: item.score }));
     }
-    if (!Number.isFinite(min) || !Number.isFinite(max)) {
-      return { min: 0, max: 10 };
-    }
-    if (min === max) {
-      return { min: min - 1, max: max + 1 };
-    }
-    const padding = (max - min) * 0.04;
-    return {
-      min: finiteValues.some((value) => value < Number(setting.min)) ? min - padding : min,
-      max: finiteValues.some((value) => value > Number(setting.max)) ? max + padding : max,
+    return state.records
+      .filter((record) => dates.includes(inferRecordDate(record)))
+      .map((record) => ({
+        date: inferRecordDate(record),
+        value: numericValue(record, role),
+      }))
+      .filter((item) => item.value !== null);
+  }
+
+  function chartDomain(setting, values, role) {
+    const fixedMin = Number.isFinite(Number(setting.min)) ? Number(setting.min) : 0;
+    const fixedMax = Number.isFinite(Number(setting.max)) ? Number(setting.max) : 10;
+    const displayed = values.filter(Number.isFinite);
+    const includeDisplayedOutliers = (domain) => {
+      if (!displayed.length) return domain;
+      const min = Math.min(domain.min, ...displayed);
+      const max = Math.max(domain.max, ...displayed);
+      if (min === domain.min && max === domain.max) return domain;
+      const padding = Math.max((max - min) * 0.04, 0.1);
+      return {
+        min: min < domain.min ? min - padding : domain.min,
+        max: max > domain.max ? max + padding : domain.max,
+      };
     };
+    if (state.analytics.scaleMode === "fixed") {
+      return { min: fixedMin, max: fixedMax };
+    }
+    const personal = recentPersonalValues(role);
+    const validDays = new Set(personal.map((item) => item.date)).size;
+    const reference = personal.map((item) => item.value).filter(Number.isFinite);
+    if (reference.length < 4 || validDays < 3) {
+      return includeDisplayedOutliers({ min: fixedMin, max: fixedMax });
+    }
+    const observedMin = Math.min(...reference);
+    const observedMax = Math.max(...reference);
+    const fixedSpan = Math.max(fixedMax - fixedMin, 1);
+    const observedSpan = Math.max(observedMax - observedMin, fixedSpan * 0.25);
+    const targetSpan = Math.min(observedSpan * 1.2, fixedSpan);
+    const center = (observedMin + observedMax) / 2;
+    let min = center - targetSpan / 2;
+    let max = center + targetSpan / 2;
+    if (min < fixedMin) {
+      max += fixedMin - min;
+      min = fixedMin;
+    }
+    if (max > fixedMax) {
+      min -= max - fixedMax;
+      max = fixedMax;
+    }
+    return includeDisplayedOutliers({
+      min: Math.max(min, fixedMin),
+      max: Math.min(max, fixedMax),
+    });
   }
 
   function prepareCanvas(canvas) {
@@ -1548,7 +1768,7 @@
     const domainValues = ranges
       ? ranges.flatMap((item) => item ? [item.min, item.max, item.mean] : [])
       : values;
-    const domain = chartDomain(setting, domainValues);
+    const domain = chartDomain(setting, domainValues, role);
     const padding = compact
       ? { left: 3, right: 3, top: 5, bottom: 3 }
       : { left: 38, right: 12, top: 10, bottom: 27 };
@@ -1577,10 +1797,18 @@
         context.fillText(formatAxisNumber(value), padding.left - 6, y);
       }
       context.textAlign = "center";
+      const maxLabels = width < 480 ? 5 : 7;
+      const labelStep = Math.max(1, Math.ceil((labels.length - 1) / Math.max(maxLabels - 1, 1)));
       labels.forEach((label, index) => {
+        if (index % labelStep !== 0 && index !== labels.length - 1) return;
         context.fillText(String(label), xAt(index), height - 9);
       });
     }
+
+    context.save();
+    context.beginPath();
+    context.rect(padding.left, padding.top, chartWidth, chartHeight);
+    context.clip();
 
     if (ranges) {
       context.strokeStyle = meta.soft;
@@ -1633,13 +1861,16 @@
         context.strokeStyle = meta.color;
       }
     });
+    context.restore();
   }
 
   function makeLineChart(key, canvas, labels, values, role, compact = false) {
     destroyChart(key);
     if (!canvas) return;
     const column = getColumnByRole(role);
-    const setting = column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 };
+    const setting = role === "state"
+      ? { min: 0, max: 100 }
+      : (column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 });
     drawNativeChart(canvas, labels, values, role, setting, compact);
     state.charts[key] = { destroy() {} };
   }
@@ -1648,7 +1879,9 @@
     destroyChart(key);
     if (!canvas) return;
     const column = getColumnByRole(role);
-    const setting = column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 };
+    const setting = role === "state"
+      ? { min: 0, max: 100 }
+      : (column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 });
     drawNativeChart(
       canvas,
       labels,
@@ -1659,6 +1892,95 @@
       aggregates
     );
     state.charts[key] = { destroy() {} };
+  }
+
+  function formatStateScore(value) {
+    return Number.isFinite(value) ? value.toFixed(1) : "-";
+  }
+
+  function formatStateDelta(delta, longWindow = false) {
+    if (!Number.isFinite(delta)) return "暂无可比变化";
+    const prefix = longWindow ? "最近 14 天较最早 14 天" : "后段较前段";
+    const sign = delta > 0 ? "+" : "";
+    return `${prefix} ${sign}${delta.toFixed(1)}`;
+  }
+
+  function renderStateOverview() {
+    const days = state.overviewScale;
+    const summary = stateWindowSummary(state.selectedDate, days);
+    [
+      [els.stateScale7Button, 7],
+      [els.stateScale14Button, 14],
+      [els.stateScale56Button, 56],
+    ].forEach(([button, value]) => {
+      button.classList.toggle("active", days === value);
+      button.setAttribute("aria-pressed", String(days === value));
+    });
+    els.overviewStateScore.textContent = formatStateScore(summary.score);
+    els.overviewStateDelta.textContent = formatStateDelta(summary.delta, days === 56);
+    const indicatorCoverage = Number.isFinite(summary.coverage)
+      ? ` · 指标覆盖 ${Math.round(summary.coverage * 100)}%`
+      : "";
+    els.overviewStateCoverage.textContent =
+      `${summary.valid.length}/${days} 个有效日${indicatorCoverage}`;
+    const dates = dateValues(state.selectedDate, days);
+    makeLineChart(
+      "overviewState",
+      els.overviewStateCanvas,
+      dates.map((date) => date.slice(5)),
+      days === 56
+        ? rollingStateValues(summary.daily)
+        : summary.daily.map((item) => item?.score ?? null),
+      "state",
+      false
+    );
+  }
+
+  function renderStateTrend(days) {
+    if (days === 1) {
+      const timeline = momentaryStateTimeline();
+      const values = timeline.map((item) => item.state?.score ?? null);
+      const valid = timeline.filter((item) => item.state);
+      const midpoint = Math.ceil(valid.length / 2);
+      const early = meanFinite(valid.slice(0, midpoint).map((item) => item.state.score));
+      const late = meanFinite(valid.slice(midpoint).map((item) => item.state.score));
+      els.trendStateScore.textContent = formatStateScore(meanFinite(values));
+      els.trendStateDelta.textContent = formatStateDelta(
+        early === null || late === null ? null : late - early
+      );
+      els.trendStateSummary.textContent =
+        `${valid.length}/${timeline.length} 个有效时间点 · 需要愉快和紧张担忧`;
+      makeLineChart(
+        "state",
+        els.stateCanvas,
+        timeline.map((item) => item.label),
+        values,
+        "state",
+        false
+      );
+      return;
+    }
+    const summary = stateWindowSummary(state.selectedDate, days);
+    els.trendStateScore.textContent = formatStateScore(summary.score);
+    els.trendStateDelta.textContent = formatStateDelta(summary.delta, days === 56);
+    const indicatorCoverage = Number.isFinite(summary.coverage)
+      ? ` · 指标覆盖 ${Math.round(summary.coverage * 100)}%`
+      : "";
+    els.trendStateSummary.textContent =
+      `${summary.valid.length}/${days} 个有效日 · ${
+        days === 56 ? "曲线为 14 天滚动均值" : "每日按时段等权"
+      }${indicatorCoverage}`;
+    const dates = dateValues(state.selectedDate, days);
+    makeLineChart(
+      "state",
+      els.stateCanvas,
+      dates.map((date) => date.slice(5)),
+      days === 56
+        ? rollingStateValues(summary.daily)
+        : summary.daily.map((item) => item?.score ?? null),
+      "state",
+      false
+    );
   }
 
   function renderTrendPreview() {
@@ -1693,11 +2015,20 @@
       .sort((a, b) => timeSortValue(a.label) - timeSortValue(b.label) || a.index - b.index);
   }
 
+  function trendWindowDays() {
+    if (state.trendMode === "week") return 7;
+    if (state.trendMode === "fortnight") return 14;
+    if (state.trendMode === "course") return 56;
+    return 1;
+  }
+
   function renderRoleChart(role, key, canvas) {
-    if (state.trendMode === "week") {
-      const dates = dateValues(state.selectedDate, 7);
-      makeRangeChart(key, canvas, dates.map((date) => date.slice(5)), aggregateRole(role, dates), role);
-      return aggregateRole(role, dates).some(Boolean);
+    const days = trendWindowDays();
+    if (days > 1) {
+      const dates = dateValues(state.selectedDate, days);
+      const aggregates = aggregateRole(role, dates);
+      makeRangeChart(key, canvas, dates.map((date) => date.slice(5)), aggregates, role);
+      return aggregates.some(Boolean);
     }
     const timeline = dailyTimeline();
     const values = timeline.map((point) => numericValue(point.record, role));
@@ -1728,7 +2059,7 @@
     entries.forEach((entry) => {
       const item = document.createElement("span");
       item.className = `track-item${role === "rumination" ? ` level-${Math.max(entry.level, 0)}` : ""}`;
-      const prefix = state.trendMode === "week" ? `${entry.date.slice(5)} ${entry.time}` : entry.time;
+      const prefix = trendWindowDays() > 1 ? `${entry.date.slice(5)} ${entry.time}` : entry.time;
       item.textContent = `${prefix} · ${entry.value}`;
       element.append(item);
     });
@@ -1773,16 +2104,30 @@
   }
 
   function renderTrends() {
-    const dates = state.trendMode === "week" ? dateValues(state.selectedDate, 7) : [state.selectedDate];
+    const days = trendWindowDays();
+    const dates = days > 1 ? dateValues(state.selectedDate, days) : [state.selectedDate];
     els.trendDateInput.value = state.selectedDate;
-    els.trendDayButton.classList.toggle("active", state.trendMode === "day");
-    els.trendWeekButton.classList.toggle("active", state.trendMode === "week");
-    els.trendPeriodTitle.textContent = state.trendMode === "day"
+    [
+      [els.trendDayButton, "day"],
+      [els.trendWeekButton, "week"],
+      [els.trendFortnightButton, "fortnight"],
+      [els.trendCourseButton, "course"],
+    ].forEach(([button, mode]) => {
+      button.classList.toggle("active", state.trendMode === mode);
+      button.setAttribute("aria-pressed", String(state.trendMode === mode));
+    });
+    const personalScale = state.analytics.scaleMode !== "fixed";
+    els.personalScaleButton.classList.toggle("active", personalScale);
+    els.fixedScaleButton.classList.toggle("active", !personalScale);
+    els.personalScaleButton.setAttribute("aria-pressed", String(personalScale));
+    els.fixedScaleButton.setAttribute("aria-pressed", String(!personalScale));
+    els.trendPeriodTitle.textContent = days === 1
       ? formatDateTitle(state.selectedDate)
-      : `${dates[0].slice(5)} 至 ${dates[6].slice(5)}`;
-    const coverageText = state.trendMode === "week"
+      : `${days} 天 · ${dates[0].slice(5)} 至 ${dates[dates.length - 1].slice(5)}`;
+    const coverageText = days > 1
       ? "折线为日均，阴影为当天最低至最高"
       : "共用时间轴，三个维度独立显示";
+    renderStateTrend(days);
 
     const chartMap = [
       ["valence", "valence", els.valenceCanvas, els.valenceRangeLabel],
@@ -1809,6 +2154,7 @@
       hasData = renderRoleChart(role, key, canvas) || hasData;
     });
     const notes = [];
+    notes.push(personalScale ? "个人缩放参考最近 14 天" : "固定量表便于跨月比较");
     if (outsideCount > 0) notes.push(`${outsideCount} 个越界值已自动扩展显示`);
     if (invalidCount > 0) notes.push(`${invalidCount} 个非数值内容未绘制`);
     els.trendCoverage.textContent = [coverageText, ...notes].join(" · ");
@@ -1893,6 +2239,16 @@
     els.backupFileInput.addEventListener("change", (event) => restoreFullBackup(event.target.files[0]));
     els.openTrendsButton.addEventListener("click", () => switchView("trends"));
     els.trendsBackButton.addEventListener("click", () => switchView("overview"));
+    [
+      [els.stateScale7Button, 7],
+      [els.stateScale14Button, 14],
+      [els.stateScale56Button, 56],
+    ].forEach(([button, days]) => {
+      button.addEventListener("click", () => {
+        state.overviewScale = days;
+        renderStateOverview();
+      });
+    });
     els.trendDayButton.addEventListener("click", () => {
       state.trendMode = "day";
       render();
@@ -1901,11 +2257,29 @@
       state.trendMode = "week";
       render();
     });
+    els.trendFortnightButton.addEventListener("click", () => {
+      state.trendMode = "fortnight";
+      render();
+    });
+    els.trendCourseButton.addEventListener("click", () => {
+      state.trendMode = "course";
+      render();
+    });
+    els.personalScaleButton.addEventListener("click", () => {
+      state.analytics.scaleMode = "personal";
+      saveAnalytics();
+      render();
+    });
+    els.fixedScaleButton.addEventListener("click", () => {
+      state.analytics.scaleMode = "fixed";
+      saveAnalytics();
+      render();
+    });
     els.trendPreviousButton.addEventListener("click", () =>
-      shiftSelectedDate(state.trendMode === "week" ? -7 : -1)
+      shiftSelectedDate(-trendWindowDays())
     );
     els.trendNextButton.addEventListener("click", () =>
-      shiftSelectedDate(state.trendMode === "week" ? 7 : 1)
+      shiftSelectedDate(trendWindowDays())
     );
     els.trendTodayButton.addEventListener("click", () => {
       state.selectedDate = todayDate();
@@ -1986,6 +2360,7 @@
       clearTimeout(bindEvents.resizeTimer);
       bindEvents.resizeTimer = setTimeout(() => {
         if (state.activeView === "overview") {
+          renderStateOverview();
           renderTrendPreview();
         } else if (state.activeView === "trends") {
           renderTrends();

@@ -1,9 +1,9 @@
-const CACHE_NAME = "mood-table-app-v7-native-charts-20260702-r4";
+const CACHE_NAME = "mood-table-app-v8-state-scales-20260702-r2";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=7.4",
-  "./app.js?v=7.4",
+  "./styles.css?v=8.1",
+  "./app.js?v=8.1",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",

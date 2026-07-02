@@ -771,6 +771,62 @@ textarea {
   overflow: hidden;
 }
 
+.state-overview {
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.compact-segments {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.state-overview-body {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  min-height: 176px;
+}
+
+.state-score-block {
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  border-right: 1px solid var(--soft-line);
+  padding: 18px;
+}
+
+.state-score-block strong {
+  font-size: 42px;
+  line-height: 1;
+}
+
+.state-score-block span {
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.state-score-block small,
+.state-trend-heading small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.state-chart-frame {
+  position: relative;
+  min-width: 0;
+  height: 176px;
+  padding: 10px 12px 8px;
+}
+
+.state-chart-frame canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .mini-chart-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -841,6 +897,14 @@ textarea {
   padding: 10px 16px;
 }
 
+.trend-range-control {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.scale-control {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .trend-notice {
   margin: 14px auto 0;
   width: min(1040px, calc(100% - 28px));
@@ -853,11 +917,54 @@ textarea {
 }
 
 .axis-chart-list,
+.state-trend-section,
 .context-section,
 .pain-section {
   width: min(1040px, calc(100% - 28px));
   margin-right: auto;
   margin-left: auto;
+}
+
+.state-trend-section {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.state-trend-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--soft-line);
+  padding: 14px 16px;
+}
+
+.state-trend-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.state-trend-heading > div:last-child {
+  justify-items: end;
+  text-align: right;
+}
+
+.state-trend-heading strong {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.state-trend-heading span {
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.state-main-chart {
+  height: 250px;
 }
 
 .axis-chart-list {
@@ -1079,6 +1186,10 @@ textarea {
     align-items: stretch;
     flex-direction: column;
   }
+
+  .trend-toolbar .segmented-control {
+    width: 100%;
+  }
 }
 
 @media (max-width: 520px) {
@@ -1197,6 +1308,7 @@ textarea {
   }
 
   .axis-chart-list,
+  .state-trend-section,
   .context-section,
   .pain-section {
     width: calc(100% - 20px);
@@ -1219,5 +1331,34 @@ textarea {
 
   .analytics-row {
     grid-template-columns: 1fr;
+  }
+
+  .state-overview-body {
+    grid-template-columns: 1fr;
+  }
+
+  .state-score-block {
+    border-right: 0;
+    border-bottom: 1px solid var(--soft-line);
+    padding: 15px;
+  }
+
+  .state-chart-frame {
+    height: 190px;
+  }
+
+  .state-trend-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .state-trend-heading > div:last-child {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .trend-range-control .segment {
+    padding-right: 6px;
+    padding-left: 6px;
   }
 }

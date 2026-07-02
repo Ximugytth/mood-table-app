@@ -8,7 +8,7 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "7.3";
+  const APP_VERSION = "7.4";
   const BACKUP_SCHEMA = "mood-table-backup";
   const ROLE_OPTIONS = [
     ["none", "不绘图"],
@@ -1524,100 +1524,144 @@
     };
   }
 
-  function baseChartOptions(setting, compact = false, values = []) {
-    const domain = chartDomain(setting, values);
-    return {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { mode: "index", intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: !compact },
-      },
-      scales: compact
-        ? { x: { display: false }, y: { display: false, min: domain.min, max: domain.max } }
-        : {
-            x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true } },
-            y: {
-              min: domain.min,
-              max: domain.max,
-              ticks: { precision: 1 },
-              grid: { color: "rgba(23,33,30,.08)" },
-            },
-          },
-    };
+  function prepareCanvas(canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(Math.round(rect.width || canvas.clientWidth || 300), 1);
+    const height = Math.max(Math.round(rect.height || canvas.clientHeight || 150), 1);
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const context = canvas.getContext("2d");
+    context.setTransform(scale, 0, 0, scale, 0, 0);
+    context.clearRect(0, 0, width, height);
+    return { context, width, height };
+  }
+
+  function formatAxisNumber(value) {
+    if (Math.abs(value) >= 100) return String(Math.round(value));
+    return String(Number(value.toFixed(1)));
+  }
+
+  function drawNativeChart(canvas, labels, values, role, setting, compact, ranges = null) {
+    const { context, width, height } = prepareCanvas(canvas);
+    const meta = AXIS_META[role];
+    const domainValues = ranges
+      ? ranges.flatMap((item) => item ? [item.min, item.max, item.mean] : [])
+      : values;
+    const domain = chartDomain(setting, domainValues);
+    const padding = compact
+      ? { left: 3, right: 3, top: 5, bottom: 3 }
+      : { left: 38, right: 12, top: 10, bottom: 27 };
+    const chartWidth = Math.max(width - padding.left - padding.right, 1);
+    const chartHeight = Math.max(height - padding.top - padding.bottom, 1);
+    const xAt = (index) => padding.left + (
+      labels.length <= 1 ? chartWidth / 2 : (index / (labels.length - 1)) * chartWidth
+    );
+    const yAt = (value) => padding.top + ((domain.max - value) / (domain.max - domain.min)) * chartHeight;
+
+    if (!compact) {
+      context.font = '11px "Microsoft YaHei", "PingFang SC", sans-serif';
+      context.textBaseline = "middle";
+      context.strokeStyle = "rgba(23,33,30,.09)";
+      context.fillStyle = "#66736f";
+      context.lineWidth = 1;
+      for (let index = 0; index <= 4; index += 1) {
+        const ratio = index / 4;
+        const y = padding.top + ratio * chartHeight;
+        const value = domain.max - ratio * (domain.max - domain.min);
+        context.beginPath();
+        context.moveTo(padding.left, y);
+        context.lineTo(width - padding.right, y);
+        context.stroke();
+        context.textAlign = "right";
+        context.fillText(formatAxisNumber(value), padding.left - 6, y);
+      }
+      context.textAlign = "center";
+      labels.forEach((label, index) => {
+        context.fillText(String(label), xAt(index), height - 9);
+      });
+    }
+
+    if (ranges) {
+      context.strokeStyle = meta.soft;
+      context.lineWidth = Math.max(8, Math.min(16, chartWidth / Math.max(labels.length, 1) / 2));
+      context.lineCap = "round";
+      ranges.forEach((item, index) => {
+        if (!item) return;
+        context.beginPath();
+        context.moveTo(xAt(index), yAt(item.min));
+        context.lineTo(xAt(index), yAt(item.max));
+        context.stroke();
+      });
+      context.lineCap = "butt";
+    }
+
+    const plottedValues = ranges ? ranges.map((item) => item?.mean ?? null) : values;
+    context.strokeStyle = meta.color;
+    context.fillStyle = meta.color;
+    context.lineWidth = compact ? 2 : 2.5;
+    context.lineJoin = "round";
+    context.lineCap = "round";
+    let drawing = false;
+    plottedValues.forEach((value, index) => {
+      if (!Number.isFinite(value)) {
+        if (drawing) context.stroke();
+        drawing = false;
+        return;
+      }
+      const x = xAt(index);
+      const y = yAt(value);
+      if (!drawing) {
+        context.beginPath();
+        context.moveTo(x, y);
+        drawing = true;
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    if (drawing) context.stroke();
+
+    plottedValues.forEach((value, index) => {
+      if (!Number.isFinite(value)) return;
+      context.beginPath();
+      context.arc(xAt(index), yAt(value), compact ? 2.5 : 3.5, 0, Math.PI * 2);
+      context.fill();
+      if (!compact) {
+        context.strokeStyle = "#ffffff";
+        context.lineWidth = 1.5;
+        context.stroke();
+        context.strokeStyle = meta.color;
+      }
+    });
   }
 
   function makeLineChart(key, canvas, labels, values, role, compact = false) {
     destroyChart(key);
-    if (!canvas || typeof Chart === "undefined") return;
+    if (!canvas) return;
     const column = getColumnByRole(role);
     const setting = column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 };
-    const meta = AXIS_META[role];
-    state.charts[key] = new Chart(canvas, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [{
-          data: values,
-          borderColor: meta.color,
-          backgroundColor: meta.soft,
-          borderWidth: compact ? 2 : 2.5,
-          pointRadius: compact ? 0 : 3,
-          pointHoverRadius: 5,
-          tension: 0.28,
-          spanGaps: false,
-          fill: compact,
-        }],
-      },
-      options: baseChartOptions(setting, compact, values),
-    });
+    drawNativeChart(canvas, labels, values, role, setting, compact);
+    state.charts[key] = { destroy() {} };
   }
 
   function makeRangeChart(key, canvas, labels, aggregates, role) {
     destroyChart(key);
-    if (!canvas || typeof Chart === "undefined") return;
+    if (!canvas) return;
     const column = getColumnByRole(role);
     const setting = column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 };
-    const meta = AXIS_META[role];
-    state.charts[key] = new Chart(canvas, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [
-          {
-            data: aggregates.map((item) => item?.max ?? null),
-            borderColor: "transparent",
-            pointRadius: 0,
-          },
-          {
-            data: aggregates.map((item) => item?.min ?? null),
-            borderColor: "transparent",
-            backgroundColor: meta.soft,
-            pointRadius: 0,
-            fill: "-1",
-          },
-          {
-            data: aggregates.map((item) => item?.mean ?? null),
-            borderColor: meta.color,
-            backgroundColor: meta.color,
-            borderWidth: 2.5,
-            pointRadius: 3,
-            tension: 0.25,
-          },
-        ],
-      },
-      options: baseChartOptions(
-        setting,
-        false,
-        aggregates.flatMap((item) => item ? [item.min, item.max, item.mean] : [])
-      ),
-    });
+    drawNativeChart(
+      canvas,
+      labels,
+      aggregates.map((item) => item?.mean ?? null),
+      role,
+      setting,
+      false,
+      aggregates
+    );
+    state.charts[key] = { destroy() {} };
   }
 
   function renderTrendPreview() {
-    if (typeof Chart === "undefined") return;
     const dates = dateValues(state.selectedDate, 7);
     const labels = dates.map((date) => date.slice(5));
     [
@@ -1938,6 +1982,16 @@
     });
 
     window.addEventListener("pagehide", flushRecordSave);
+    window.addEventListener("resize", () => {
+      clearTimeout(bindEvents.resizeTimer);
+      bindEvents.resizeTimer = setTimeout(() => {
+        if (state.activeView === "overview") {
+          renderTrendPreview();
+        } else if (state.activeView === "trends") {
+          renderTrends();
+        }
+      }, 120);
+    });
   }
 
   async function registerServiceWorker() {

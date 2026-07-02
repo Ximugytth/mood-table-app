@@ -1,14 +1,13 @@
-const CACHE_NAME = "mood-table-app-v7-three-axis-20260701-r3";
+const CACHE_NAME = "mood-table-app-v7-native-charts-20260702-r4";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=7.3",
-  "./app.js?v=7.3",
+  "./styles.css?v=7.4",
+  "./app.js?v=7.4",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
-  "./assets/chart.umd.min.js?v=4.4.9",
 ];
 
 self.addEventListener("install", (event) => {

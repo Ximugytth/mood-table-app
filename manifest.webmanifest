@@ -1,7 +1,7 @@
 {
   "name": "心情表格",
   "short_name": "心情表格",
-  "description": "按天记录心情的离线表格，支持模板、本地保存和 CSV 导入导出。",
+  "description": "按天记录心情的离线表格，支持三轴趋势、模板、本地保存和 CSV 导入导出。",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

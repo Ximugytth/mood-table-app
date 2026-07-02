@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=7.1" />
+    <link rel="stylesheet" href="./styles.css?v=7.3" />
   </head>
   <body>
     <div class="app-shell">
@@ -75,6 +75,10 @@
               <label class="field-label" for="searchInput">筛选摘要</label>
               <input id="searchInput" type="search" placeholder="搜索时间或记录内容" autocomplete="off" />
               <button id="clearSearchButton" class="quiet-button" type="button">清空</button>
+            </div>
+            <div class="sort-row">
+              <label class="field-label" for="sortSelect">排序</label>
+              <select id="sortSelect" aria-label="记录排序"></select>
             </div>
           </section>
 
@@ -290,6 +294,6 @@
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     <script src="./assets/chart.umd.min.js?v=4.4.9" defer></script>
-    <script src="./app.js?v=7" defer></script>
+    <script src="./app.js?v=7.3" defer></script>
   </body>
 </html>

@@ -8,7 +8,7 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "7";
+  const APP_VERSION = "7.3";
   const BACKUP_SCHEMA = "mood-table-backup";
   const ROLE_OPTIONS = [
     ["none", "不绘图"],
@@ -79,6 +79,7 @@
     backupFileInput: document.getElementById("backupFileInput"),
     searchInput: document.getElementById("searchInput"),
     clearSearchButton: document.getElementById("clearSearchButton"),
+    sortSelect: document.getElementById("sortSelect"),
     overviewView: document.getElementById("overviewView"),
     recordView: document.getElementById("recordView"),
     openRecordButton: document.getElementById("openRecordButton"),
@@ -183,7 +184,8 @@
   }
 
   function normalizeDateValue(value) {
-    const match = String(value || "").trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    const input = String(value || "").trim();
+    const match = input.match(/^(\d{4})\s*[-年/.]\s*(\d{1,2})\s*[-月/.]\s*(\d{1,2})(?:\s*日)?(?:$|[T\s])/);
     if (!match) {
       return "";
     }
@@ -192,6 +194,23 @@
     return normalized === `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`
       ? normalized
       : "";
+  }
+
+  function parseNumericValue(value) {
+    const text = String(value ?? "")
+      .trim()
+      .replace(/[，,]/g, ".")
+      .replace(/[－−]/g, "-")
+      .replace(/[＋]/g, "+");
+    if (!text) {
+      return null;
+    }
+    const match = text.match(/^([-+]?(?:\d+(?:\.\d*)?|\.\d+))(?:\s*(?:分|\/\s*\d+(?:\.\d+)?))?$/);
+    if (!match) {
+      return null;
+    }
+    const number = Number(match[1]);
+    return Number.isFinite(number) ? number : null;
   }
 
   function dateFromValue(value) {
@@ -313,8 +332,11 @@
 
   function saveAnalytics() {
     state.analytics = reconcileAnalytics(state.analytics);
-    localStorage.setItem(STORAGE.analytics(state.activeTemplateId), JSON.stringify(state.analytics));
-    markSaved();
+    if (writeStorage(STORAGE.analytics(state.activeTemplateId), state.analytics)) {
+      markSaved();
+      return true;
+    }
+    return false;
   }
 
   function getColumnByRole(role) {
@@ -347,12 +369,15 @@
   }
 
   function saveTemplates() {
-    localStorage.setItem(STORAGE.templates, JSON.stringify(state.templates));
+    return writeStorage(STORAGE.templates, state.templates);
   }
 
   function saveRecords() {
-    localStorage.setItem(STORAGE.records(state.activeTemplateId), JSON.stringify(state.records));
-    markSaved();
+    if (writeStorage(STORAGE.records(state.activeTemplateId), state.records)) {
+      markSaved();
+      return true;
+    }
+    return false;
   }
 
   function loadRecords() {
@@ -401,8 +426,21 @@
     })}`;
   }
 
+  function writeStorage(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (error) {
+      console.error("Local storage write failed", error);
+      els.saveStatus.textContent = "保存失败，请立即导出完整备份";
+      showToast("本机存储空间不足，刚才的修改可能未保存");
+      return false;
+    }
+  }
+
   function render() {
     renderTemplateSelect();
+    renderSortSelect();
     renderDateWorkspace();
     renderStats();
     renderOverviewSummary();
@@ -447,6 +485,27 @@
     });
   }
 
+  function renderSortSelect() {
+    const template = getActiveTemplate();
+    const selectedValue = state.sort.columnId && state.sort.direction
+      ? `${state.sort.columnId}|${state.sort.direction}`
+      : "";
+    els.sortSelect.innerHTML = "";
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = "按录入顺序";
+    els.sortSelect.append(defaultOption);
+    (template?.columns || []).forEach((column) => {
+      [["asc", "升序"], ["desc", "降序"]].forEach(([direction, label]) => {
+        const option = document.createElement("option");
+        option.value = `${column.id}|${direction}`;
+        option.textContent = `${column.name} · ${label}`;
+        option.selected = option.value === selectedValue;
+        els.sortSelect.append(option);
+      });
+    });
+  }
+
   function getVisibleRecords() {
     const template = getActiveTemplate();
     if (!template) {
@@ -463,11 +522,20 @@
     }
     if (state.sort.columnId && state.sort.direction) {
       records.sort((a, b) => {
-        const aValue = String(a.values?.[state.sort.columnId] || "");
-        const bValue = String(b.values?.[state.sort.columnId] || "");
-        const aNum = parseFloat(aValue);
-        const bNum = parseFloat(bValue);
-        const bothNumeric = Number.isFinite(aNum) && Number.isFinite(bNum);
+        const dateColumn = getDateColumn(template);
+        const timeColumn = getTimeColumn(template);
+        const valueFor = (record) => {
+          if (state.sort.columnId === dateColumn?.id) return inferRecordDate(record, template);
+          if (state.sort.columnId === timeColumn?.id) return recordTime(record, template);
+          return String(record.values?.[state.sort.columnId] || "");
+        };
+        const aValue = valueFor(a);
+        const bValue = valueFor(b);
+        if (!String(aValue).trim() && String(bValue).trim()) return 1;
+        if (String(aValue).trim() && !String(bValue).trim()) return -1;
+        const aNum = parseNumericValue(aValue);
+        const bNum = parseNumericValue(bValue);
+        const bothNumeric = aNum !== null && bNum !== null;
         const result = bothNumeric
           ? aNum - bNum
           : aValue.localeCompare(bValue, "zh-CN", { numeric: true });
@@ -699,14 +767,16 @@
       input.removeAttribute("title");
       return;
     }
-    const value = Number(String(input.value).replace(",", "."));
+    const value = parseNumericValue(input.value);
     const invalid =
-      !Number.isFinite(value) ||
+      value === null ||
       (Number.isFinite(Number(setting.min)) && value < Number(setting.min)) ||
       (Number.isFinite(Number(setting.max)) && value > Number(setting.max));
     input.classList.toggle("invalid-value", invalid);
     if (invalid) {
-      input.title = `绘图范围：${setting.min} ～ ${setting.max}。原始值仍会保存，但不会进入图表。`;
+      input.title = value === null
+        ? "这个内容不是可识别的数值，原始内容仍会保存。"
+        : `参考范围：${setting.min} ～ ${setting.max}。原始值仍会保存并显示在图表中。`;
     } else {
       input.removeAttribute("title");
     }
@@ -726,8 +796,8 @@
     els.moodAverageLabel.textContent = moodColumn ? `平均${moodColumn.name}` : "平均指标";
     const values = moodColumn
       ? visibleRecords
-          .map((record) => parseFloat(String(record.values?.[moodColumn.id] || "").replace(",", ".")))
-          .filter((value) => Number.isFinite(value))
+          .map((record) => parseNumericValue(record.values?.[moodColumn.id]))
+          .filter((value) => value !== null)
       : [];
 
     if (values.length === 0) {
@@ -931,10 +1001,29 @@
 
     const template = getActiveTemplate();
     const oldColumns = template.columns;
-    const nextColumns = columnNames.map((columnName, index) => ({
-      id: oldColumns[index]?.id || uid("col"),
-      name: columnName,
-    }));
+    const assignedOldIds = new Set();
+    const nextColumns = columnNames.map((columnName) => {
+      const exact = oldColumns.find(
+        (column) => column.name === columnName && !assignedOldIds.has(column.id)
+      );
+      if (exact) {
+        assignedOldIds.add(exact.id);
+        return { id: exact.id, name: columnName };
+      }
+      return null;
+    });
+    nextColumns.forEach((column, index) => {
+      if (column) {
+        return;
+      }
+      const positional = oldColumns[index];
+      if (positional && !assignedOldIds.has(positional.id)) {
+        assignedOldIds.add(positional.id);
+        nextColumns[index] = { id: positional.id, name: columnNames[index] };
+      } else {
+        nextColumns[index] = { id: uid("col"), name: columnNames[index] };
+      }
+    });
     const nextIds = new Set(nextColumns.map((column) => column.id));
     state.records.forEach((record) => {
       nextColumns.forEach((column) => {
@@ -1027,7 +1116,7 @@
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-    URL.revokeObjectURL(anchor.href);
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
     showToast(`已导出 ${exportRecords.length} 条记录，请到“下载”中查看`);
   }
 
@@ -1126,7 +1215,9 @@
     }
     const mode = new FormData(els.importForm).get("importMode");
     const template = getActiveTemplate();
-    const headers = uniqueNames(state.importRows[0]);
+    const headers = uniqueNames(
+      state.importRows[0].map((header, index) => String(header || "").trim() || `第 ${index + 1} 列`)
+    );
     const dataRows = state.importRows.slice(1);
     const importedDateIndex = headers.findIndex((header) => header.includes("日期"));
     let columns;
@@ -1269,10 +1360,12 @@
     state.templates.forEach((template) => {
       const records = safeJsonParse(localStorage.getItem(STORAGE.records(template.id)), []);
       const analytics = safeJsonParse(localStorage.getItem(STORAGE.analytics(template.id)), null);
-      recordsByTemplate[template.id] = Array.isArray(records) ? records : [];
-      analyticsByTemplate[template.id] = analytics || (
-        template.id === state.activeTemplateId ? state.analytics : { version: 1, columns: {} }
-      );
+      recordsByTemplate[template.id] = template.id === state.activeTemplateId
+        ? state.records
+        : (Array.isArray(records) ? records : []);
+      analyticsByTemplate[template.id] = template.id === state.activeTemplateId
+        ? state.analytics
+        : (analytics || { version: 1, columns: {} });
     });
     const backup = {
       schema: BACKUP_SCHEMA,
@@ -1291,7 +1384,7 @@
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-    URL.revokeObjectURL(anchor.href);
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
     showToast("完整备份已导出，请妥善保存");
   }
 
@@ -1304,7 +1397,15 @@
       if (ids.has(template.id)) return "备份中有重复模板";
       ids.add(template.id);
       if (!template.columns.every((column) => column?.id && typeof column.name === "string")) return "模板列结构不完整";
-      if (!Array.isArray(backup.recordsByTemplate?.[template.id])) return "记录结构不完整";
+      const records = backup.recordsByTemplate?.[template.id];
+      if (!Array.isArray(records)) return "记录结构不完整";
+      if (!records.every((record) => record && typeof record === "object" && record.values && typeof record.values === "object")) {
+        return "记录内容结构不完整";
+      }
+      const analytics = backup.analyticsByTemplate?.[template.id];
+      if (analytics && (typeof analytics !== "object" || typeof analytics.columns !== "object")) {
+        return "分析设置结构不完整";
+      }
     }
     if (!ids.has(backup.activeTemplateId)) return "当前模板无效";
     return "";
@@ -1326,21 +1427,33 @@
       if (!confirm(`恢复 ${backup.templates.length} 个模板、${recordCount} 条记录？这会覆盖本机现有的心情表格数据。`)) {
         return;
       }
-      Object.keys(localStorage)
-        .filter((key) => key.startsWith("moodTable.records.") || key.startsWith("moodTable.analytics."))
-        .forEach((key) => localStorage.removeItem(key));
-      localStorage.setItem(STORAGE.templates, JSON.stringify(backup.templates));
-      localStorage.setItem(STORAGE.activeTemplateId, backup.activeTemplateId);
-      backup.templates.forEach((template) => {
-        localStorage.setItem(
-          STORAGE.records(template.id),
-          JSON.stringify(backup.recordsByTemplate[template.id])
-        );
-        const analytics = backup.analyticsByTemplate?.[template.id];
-        if (analytics) {
-          localStorage.setItem(STORAGE.analytics(template.id), JSON.stringify(analytics));
-        }
-      });
+      const moodKeys = Object.keys(localStorage).filter((key) => key.startsWith("moodTable."));
+      const previousData = new Map(moodKeys.map((key) => [key, localStorage.getItem(key)]));
+      try {
+        moodKeys.forEach((key) => localStorage.removeItem(key));
+        localStorage.setItem(STORAGE.templates, JSON.stringify(backup.templates));
+        localStorage.setItem(STORAGE.activeTemplateId, backup.activeTemplateId);
+        backup.templates.forEach((template) => {
+          localStorage.setItem(
+            STORAGE.records(template.id),
+            JSON.stringify(backup.recordsByTemplate[template.id])
+          );
+          const analytics = backup.analyticsByTemplate?.[template.id];
+          if (analytics) {
+            localStorage.setItem(STORAGE.analytics(template.id), JSON.stringify(analytics));
+          }
+        });
+      } catch (writeError) {
+        Object.keys(localStorage)
+          .filter((key) => key.startsWith("moodTable."))
+          .forEach((key) => localStorage.removeItem(key));
+        previousData.forEach((value, key) => {
+          if (value !== null) {
+            localStorage.setItem(key, value);
+          }
+        });
+        throw writeError;
+      }
       loadApp();
       switchView("overview");
       showToast("完整备份已恢复");
@@ -1364,12 +1477,7 @@
   function numericValue(record, role) {
     const column = getColumnByRole(role);
     if (!column) return null;
-    const setting = getAnalyticsSetting(column.id);
-    const value = Number(String(record.values?.[column.id] ?? "").replace(",", "."));
-    if (!Number.isFinite(value)) return null;
-    if (Number.isFinite(Number(setting.min)) && value < Number(setting.min)) return null;
-    if (Number.isFinite(Number(setting.max)) && value > Number(setting.max)) return null;
-    return value;
+    return parseNumericValue(record.values?.[column.id]);
   }
 
   function aggregateRole(role, dates) {
@@ -1395,7 +1503,29 @@
     }
   }
 
-  function baseChartOptions(setting, compact = false) {
+  function chartDomain(setting, values) {
+    const finiteValues = values.filter((value) => Number.isFinite(value));
+    let min = Number.isFinite(Number(setting.min)) ? Number(setting.min) : Math.min(...finiteValues);
+    let max = Number.isFinite(Number(setting.max)) ? Number(setting.max) : Math.max(...finiteValues);
+    if (finiteValues.length > 0) {
+      min = Math.min(min, ...finiteValues);
+      max = Math.max(max, ...finiteValues);
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      return { min: 0, max: 10 };
+    }
+    if (min === max) {
+      return { min: min - 1, max: max + 1 };
+    }
+    const padding = (max - min) * 0.04;
+    return {
+      min: finiteValues.some((value) => value < Number(setting.min)) ? min - padding : min,
+      max: finiteValues.some((value) => value > Number(setting.max)) ? max + padding : max,
+    };
+  }
+
+  function baseChartOptions(setting, compact = false, values = []) {
+    const domain = chartDomain(setting, values);
     return {
       responsive: true,
       maintainAspectRatio: false,
@@ -1406,12 +1536,12 @@
         tooltip: { enabled: !compact },
       },
       scales: compact
-        ? { x: { display: false }, y: { display: false, min: setting.min, max: setting.max } }
+        ? { x: { display: false }, y: { display: false, min: domain.min, max: domain.max } }
         : {
             x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true } },
             y: {
-              min: setting.min,
-              max: setting.max,
+              min: domain.min,
+              max: domain.max,
               ticks: { precision: 1 },
               grid: { color: "rgba(23,33,30,.08)" },
             },
@@ -1441,7 +1571,7 @@
           fill: compact,
         }],
       },
-      options: baseChartOptions(setting, compact),
+      options: baseChartOptions(setting, compact, values),
     });
   }
 
@@ -1478,7 +1608,11 @@
           },
         ],
       },
-      options: baseChartOptions(setting, false),
+      options: baseChartOptions(
+        setting,
+        false,
+        aggregates.flatMap((item) => item ? [item.min, item.max, item.mean] : [])
+      ),
     });
   }
 
@@ -1499,12 +1633,20 @@
     });
   }
 
-  function dailyRoleData(role) {
+  function timeSortValue(value) {
+    const match = String(value || "").match(/^(\d{1,2}):(\d{2})/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : Number.MAX_SAFE_INTEGER;
+  }
+
+  function dailyTimeline() {
     return state.records
       .filter((record) => inferRecordDate(record) === state.selectedDate)
-      .map((record) => ({ label: recordTime(record) || "--:--", value: numericValue(record, role) }))
-      .filter((item) => item.value !== null)
-      .sort((a, b) => a.label.localeCompare(b.label));
+      .map((record, index) => ({
+        record,
+        index,
+        label: recordTime(record) || "--:--",
+      }))
+      .sort((a, b) => timeSortValue(a.label) - timeSortValue(b.label) || a.index - b.index);
   }
 
   function renderRoleChart(role, key, canvas) {
@@ -1513,9 +1655,10 @@
       makeRangeChart(key, canvas, dates.map((date) => date.slice(5)), aggregateRole(role, dates), role);
       return aggregateRole(role, dates).some(Boolean);
     }
-    const points = dailyRoleData(role);
-    makeLineChart(key, canvas, points.map((point) => point.label), points.map((point) => point.value), role);
-    return points.length > 0;
+    const timeline = dailyTimeline();
+    const values = timeline.map((point) => numericValue(point.record, role));
+    makeLineChart(key, canvas, timeline.map((point) => point.label), values, role);
+    return values.some((value) => value !== null);
   }
 
   function renderContextTrack(element, role, dates) {
@@ -1553,6 +1696,38 @@
     }
   }
 
+  function roleDataStatus(role, dates) {
+    const column = getColumnByRole(role);
+    const setting = column ? getAnalyticsSetting(column.id) : null;
+    const status = { valid: 0, invalid: 0, outside: 0, min: null, max: null };
+    if (!column) {
+      return status;
+    }
+    state.records
+      .filter((record) => dates.includes(inferRecordDate(record)))
+      .forEach((record) => {
+        const raw = String(record.values?.[column.id] ?? "").trim();
+        if (!raw) {
+          return;
+        }
+        const value = parseNumericValue(raw);
+        if (value === null) {
+          status.invalid += 1;
+          return;
+        }
+        status.valid += 1;
+        status.min = status.min === null ? value : Math.min(status.min, value);
+        status.max = status.max === null ? value : Math.max(status.max, value);
+        if (
+          (Number.isFinite(Number(setting?.min)) && value < Number(setting.min)) ||
+          (Number.isFinite(Number(setting?.max)) && value > Number(setting.max))
+        ) {
+          status.outside += 1;
+        }
+      });
+    return status;
+  }
+
   function renderTrends() {
     const dates = state.trendMode === "week" ? dateValues(state.selectedDate, 7) : [state.selectedDate];
     els.trendDateInput.value = state.selectedDate;
@@ -1561,7 +1736,7 @@
     els.trendPeriodTitle.textContent = state.trendMode === "day"
       ? formatDateTitle(state.selectedDate)
       : `${dates[0].slice(5)} 至 ${dates[6].slice(5)}`;
-    els.trendCoverage.textContent = state.trendMode === "week"
+    const coverageText = state.trendMode === "week"
       ? "折线为日均，阴影为当天最低至最高"
       : "共用时间轴，三个维度独立显示";
 
@@ -1572,12 +1747,27 @@
       ["physical", "pain", els.painCanvas, els.painRangeLabel],
     ];
     let hasData = false;
+    let invalidCount = 0;
+    let outsideCount = 0;
     chartMap.forEach(([role, key, canvas, rangeLabel]) => {
       const column = getColumnByRole(role);
       const setting = column ? getAnalyticsSetting(column.id) : null;
-      rangeLabel.textContent = setting ? `${setting.min} ～ ${setting.max}` : "未设置";
+      const status = roleDataStatus(role, dates);
+      invalidCount += status.invalid;
+      outsideCount += status.outside;
+      const actualOutside =
+        setting &&
+        status.valid > 0 &&
+        (status.min < Number(setting.min) || status.max > Number(setting.max));
+      rangeLabel.textContent = setting
+        ? `${setting.min} ～ ${setting.max}${actualOutside ? ` · 实际 ${status.min} ～ ${status.max}` : ""}`
+        : "未设置";
       hasData = renderRoleChart(role, key, canvas) || hasData;
     });
+    const notes = [];
+    if (outsideCount > 0) notes.push(`${outsideCount} 个越界值已自动扩展显示`);
+    if (invalidCount > 0) notes.push(`${invalidCount} 个非数值内容未绘制`);
+    els.trendCoverage.textContent = [coverageText, ...notes].join(" · ");
     els.trendNoData.classList.toggle("hidden", hasData);
     renderContextTrack(els.ruminationTrack, "rumination", dates);
     renderContextTrack(els.activityTrack, "activity", dates);
@@ -1694,6 +1884,11 @@
       els.searchInput.value = "";
       render();
     });
+    els.sortSelect.addEventListener("change", () => {
+      const [columnId = "", direction = ""] = els.sortSelect.value.split("|");
+      state.sort = { columnId, direction };
+      renderOverviewSummary();
+    });
 
     els.templateForm.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1750,7 +1945,10 @@
       return;
     }
     try {
-      await navigator.serviceWorker.register("./sw.js");
+      const registration = await navigator.serviceWorker.register("./sw.js", {
+        updateViaCache: "none",
+      });
+      await registration.update();
     } catch (error) {
       console.warn("Service worker registration failed", error);
     }

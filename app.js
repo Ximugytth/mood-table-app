@@ -8,7 +8,7 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "8.1";
+  const APP_VERSION = "8.2";
   const BACKUP_SCHEMA = "mood-table-backup";
   const ROLE_OPTIONS = [
     ["none", "不绘图"],
@@ -135,6 +135,10 @@
     trendDateInput: document.getElementById("trendDateInput"),
     trendNextButton: document.getElementById("trendNextButton"),
     trendTodayButton: document.getElementById("trendTodayButton"),
+    trendTimelineControl: document.getElementById("trendTimelineControl"),
+    trendTimelineSlider: document.getElementById("trendTimelineSlider"),
+    trendSliderStart: document.getElementById("trendSliderStart"),
+    trendSliderEnd: document.getElementById("trendSliderEnd"),
     trendPeriodTitle: document.getElementById("trendPeriodTitle"),
     trendCoverage: document.getElementById("trendCoverage"),
     trendNoData: document.getElementById("trendNoData"),
@@ -244,6 +248,51 @@
     date.setDate(date.getDate() + days);
     state.selectedDate = formatLocalDate(date);
     state.viewMode = "day";
+    render();
+  }
+
+  function addDateDays(value, days) {
+    const date = dateFromValue(value);
+    date.setDate(date.getDate() + days);
+    return formatLocalDate(date);
+  }
+
+  function dateDistance(startValue, endValue) {
+    const start = dateFromValue(startValue);
+    const end = dateFromValue(endValue);
+    const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+    const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+    return Math.round((endUtc - startUtc) / 86400000);
+  }
+
+  function trendSliderBounds() {
+    const recordDates = state.records
+      .map(inferRecordDate)
+      .filter(Boolean)
+      .sort();
+    const fallbackStart = addDateDays(todayDate(), -90);
+    const minimum = recordDates[0] || fallbackStart;
+    const maximum = [
+      recordDates[recordDates.length - 1] || todayDate(),
+      todayDate(),
+    ].sort().at(-1);
+    return {
+      minimum,
+      maximum,
+      offset: Math.min(
+        Math.max(dateDistance(minimum, state.selectedDate), 0),
+        Math.max(dateDistance(minimum, maximum), 1)
+      ),
+      span: Math.max(dateDistance(minimum, maximum), 1),
+    };
+  }
+
+  function shiftTrendDate(days) {
+    const slider = trendSliderBounds();
+    const target = addDateDays(state.selectedDate, days);
+    state.selectedDate = target < slider.minimum
+      ? slider.minimum
+      : (target > slider.maximum ? slider.maximum : target);
     render();
   }
 
@@ -2107,6 +2156,22 @@
     const days = trendWindowDays();
     const dates = days > 1 ? dateValues(state.selectedDate, days) : [state.selectedDate];
     els.trendDateInput.value = state.selectedDate;
+    els.trendTimelineControl.classList.toggle("hidden", days === 1);
+    if (days > 1) {
+      const slider = trendSliderBounds();
+      els.trendTimelineSlider.min = "0";
+      els.trendTimelineSlider.max = String(slider.span);
+      els.trendTimelineSlider.value = String(slider.offset);
+      els.trendTimelineSlider.dataset.minimum = slider.minimum;
+      els.trendDateInput.min = slider.minimum;
+      els.trendDateInput.max = slider.maximum;
+      els.trendSliderStart.textContent = dates[0];
+      els.trendSliderEnd.textContent = dates[dates.length - 1];
+      els.trendTimelineSlider.setAttribute(
+        "aria-valuetext",
+        `${dates[0]} 至 ${dates[dates.length - 1]}`
+      );
+    }
     [
       [els.trendDayButton, "day"],
       [els.trendWeekButton, "week"],
@@ -2275,12 +2340,8 @@
       saveAnalytics();
       render();
     });
-    els.trendPreviousButton.addEventListener("click", () =>
-      shiftSelectedDate(-trendWindowDays())
-    );
-    els.trendNextButton.addEventListener("click", () =>
-      shiftSelectedDate(trendWindowDays())
-    );
+    els.trendPreviousButton.addEventListener("click", () => shiftTrendDate(-1));
+    els.trendNextButton.addEventListener("click", () => shiftTrendDate(1));
     els.trendTodayButton.addEventListener("click", () => {
       state.selectedDate = todayDate();
       render();
@@ -2291,6 +2352,13 @@
         state.selectedDate = date;
         render();
       }
+    });
+    els.trendTimelineSlider.addEventListener("input", () => {
+      const minimum = normalizeDateValue(els.trendTimelineSlider.dataset.minimum);
+      if (!minimum) return;
+      state.selectedDate = addDateDays(minimum, Number(els.trendTimelineSlider.value));
+      clearTimeout(bindEvents.sliderTimer);
+      bindEvents.sliderTimer = setTimeout(renderTrends, 16);
     });
     els.searchInput.addEventListener("input", () => {
       state.search = els.searchInput.value;

@@ -1,9 +1,9 @@
-const CACHE_NAME = "mood-table-app-v8-window-slider-20260703-r1";
+const CACHE_NAME = "mood-table-app-v8-3-chart-inspector-20260704-r1";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=8.2",
-  "./app.js?v=8.2",
+  "./styles.css?v=8.3",
+  "./app.js?v=8.3",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",
@@ -24,7 +24,11 @@ self.addEventListener("activate", (event) => {
       .then((cacheNames) =>
         Promise.all(
           cacheNames
-            .filter((cacheName) => cacheName !== CACHE_NAME)
+            .filter(
+              (cacheName) =>
+                cacheName.startsWith("mood-table-app-") &&
+                cacheName !== CACHE_NAME
+            )
             .map((cacheName) => caches.delete(cacheName))
         )
       )

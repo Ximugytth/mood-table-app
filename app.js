@@ -8,7 +8,7 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "8.2";
+  const APP_VERSION = "8.3";
   const BACKUP_SCHEMA = "mood-table-backup";
   const ROLE_OPTIONS = [
     ["none", "不绘图"],
@@ -327,6 +327,7 @@
         id: uid("col"),
         name: columnName,
       })),
+      archivedColumns: [],
       createdAt,
       updatedAt: createdAt,
     };
@@ -350,6 +351,34 @@
 
   function getActiveTemplate() {
     return state.templates.find((template) => template.id === state.activeTemplateId) || state.templates[0];
+  }
+
+  function getArchivedColumns(template = getActiveTemplate()) {
+    return Array.isArray(template?.archivedColumns) ? template.archivedColumns : [];
+  }
+
+  function archiveColumn(template, column) {
+    const archived = getArchivedColumns(template);
+    if (!archived.some((item) => item.id === column.id)) {
+      archived.push({
+        id: column.id,
+        name: column.name,
+        analytics: state.analytics.columns[column.id] || inferAnalyticsForColumn(column),
+      });
+    }
+    template.archivedColumns = archived;
+  }
+
+  function restoreArchivedColumn(template, name) {
+    const archived = getArchivedColumns(template);
+    const index = archived.findIndex((column) => column.name === name);
+    if (index < 0) return null;
+    const [restored] = archived.splice(index, 1);
+    template.archivedColumns = archived;
+    if (restored.analytics) {
+      state.analytics.columns[restored.id] = restored.analytics;
+    }
+    return { id: restored.id, name };
   }
 
   function inferAnalyticsForColumn(column) {
@@ -431,8 +460,9 @@
       state.activeTemplateId =
         localStorage.getItem(STORAGE.activeTemplateId) || state.templates[0].id;
     }
-    if (!getActiveTemplate()) {
+    if (!state.templates.some((template) => template.id === state.activeTemplateId)) {
       state.activeTemplateId = state.templates[0].id;
+      localStorage.setItem(STORAGE.activeTemplateId, state.activeTemplateId);
     }
     loadRecords();
     loadAnalytics();
@@ -589,7 +619,7 @@
     if (query) {
       records = records.filter((record) =>
         template.columns.some((column) =>
-          String(record.values?.[column.id] || "").toLowerCase().includes(query)
+          String(record.values?.[column.id] ?? "").toLowerCase().includes(query)
         )
       );
     }
@@ -600,7 +630,7 @@
         const valueFor = (record) => {
           if (state.sort.columnId === dateColumn?.id) return inferRecordDate(record, template);
           if (state.sort.columnId === timeColumn?.id) return recordTime(record, template);
-          return String(record.values?.[state.sort.columnId] || "");
+          return String(record.values?.[state.sort.columnId] ?? "");
         };
         const aValue = valueFor(a);
         const bValue = valueFor(b);
@@ -620,7 +650,7 @@
 
   function recordTime(record, template = getActiveTemplate()) {
     const timeColumn = getTimeColumn(template);
-    return String(timeColumn ? record.values?.[timeColumn.id] || "" : record.entryTime || "");
+    return String(timeColumn ? record.values?.[timeColumn.id] ?? "" : record.entryTime ?? "");
   }
 
   function renderOverviewSummary() {
@@ -647,7 +677,7 @@
       const values = document.createElement("div");
       values.className = "summary-values";
       metricColumns.forEach((column) => {
-        const value = String(record.values?.[column.id] || "").trim();
+        const value = String(record.values?.[column.id] ?? "").trim();
         if (!value) {
           return;
         }
@@ -797,7 +827,7 @@
             ? `${setting.min ?? ""} ～ ${setting.max ?? ""}`
             : "填写内容";
         }
-        input.value = record.values?.[column.id] || "";
+        input.value = record.values?.[column.id] ?? "";
         input.dataset.recordId = record.id;
         input.dataset.metricIndex = String(metricIndex);
         input.setAttribute("aria-label", `${column.name}，${recordTime(record, template) || "当前时间"}`);
@@ -948,19 +978,30 @@
     if (!name || !name.trim()) {
       return;
     }
-    const column = { id: uid("col"), name: uniqueColumnName(name.trim(), template.columns) };
+    const requestedName = name.trim();
+    const restored = template.columns.some((column) => column.name === requestedName)
+      ? null
+      : restoreArchivedColumn(template, requestedName);
+    const column = restored || {
+      id: uid("col"),
+      name: uniqueColumnName(requestedName, template.columns),
+    };
     template.columns.push(column);
-    state.analytics.columns[column.id] = inferAnalyticsForColumn(column);
+    if (!state.analytics.columns[column.id]) {
+      state.analytics.columns[column.id] = inferAnalyticsForColumn(column);
+    }
     template.updatedAt = nowIso();
     state.records.forEach((record) => {
-      record.values[column.id] = "";
+      if (!(column.id in record.values)) {
+        record.values[column.id] = "";
+      }
       record.updatedAt = nowIso();
     });
     saveTemplates();
     saveRecords();
     saveAnalytics();
     render();
-    showToast("已添加列");
+    showToast(restored ? "已恢复归档列及历史数据" : "已添加列");
   }
 
   function renameColumn(columnId, nextName) {
@@ -993,16 +1034,13 @@
       return;
     }
     const column = template.columns.find((item) => item.id === columnId);
-    if (!column || !confirm(`删除列「${column.name}」？这一列的数据也会删除。`)) {
+    if (!column || !confirm(`归档列「${column.name}」？历史数据会保留，以后添加同名列可恢复。`)) {
       return;
     }
+    archiveColumn(template, column);
     template.columns = template.columns.filter((item) => item.id !== columnId);
     delete state.analytics.columns[columnId];
     template.updatedAt = nowIso();
-    state.records.forEach((record) => {
-      delete record.values[columnId];
-      record.updatedAt = nowIso();
-    });
     if (state.sort.columnId === columnId) {
       state.sort = { columnId: "", direction: "" };
     }
@@ -1010,7 +1048,7 @@
     saveRecords();
     saveAnalytics();
     render();
-    showToast("列已删除");
+    showToast("列已归档，历史数据仍保留");
   }
 
   function uniqueColumnName(name, columns) {
@@ -1074,6 +1112,23 @@
 
     const template = getActiveTemplate();
     const oldColumns = template.columns;
+    const oldNames = new Set(oldColumns.map((column) => column.name));
+    const potentialRenames = columnNames.length === oldColumns.length
+      ? columnNames
+          .map((columnName, index) => (
+            oldColumns[index]?.name !== columnName && !oldNames.has(columnName)
+              ? `${oldColumns[index]?.name || "新列"} → ${columnName}`
+              : ""
+          ))
+          .filter(Boolean)
+      : [];
+    if (
+      state.records.length > 0 &&
+      potentialRenames.length > 0 &&
+      !confirm(`以下列将按位置更名并继续关联历史数据：\n${potentialRenames.join("\n")}\n\n继续吗？`)
+    ) {
+      return false;
+    }
     const assignedOldIds = new Set();
     const nextColumns = columnNames.map((columnName) => {
       const exact = oldColumns.find(
@@ -1083,30 +1138,32 @@
         assignedOldIds.add(exact.id);
         return { id: exact.id, name: columnName };
       }
+      const restored = restoreArchivedColumn(template, columnName);
+      if (restored) {
+        return restored;
+      }
       return null;
     });
+    const sameColumnCount = columnNames.length === oldColumns.length;
     nextColumns.forEach((column, index) => {
       if (column) {
         return;
       }
       const positional = oldColumns[index];
-      if (positional && !assignedOldIds.has(positional.id)) {
+      if (sameColumnCount && positional && !assignedOldIds.has(positional.id)) {
         assignedOldIds.add(positional.id);
         nextColumns[index] = { id: positional.id, name: columnNames[index] };
       } else {
         nextColumns[index] = { id: uid("col"), name: columnNames[index] };
       }
     });
-    const nextIds = new Set(nextColumns.map((column) => column.id));
+    oldColumns
+      .filter((column) => !assignedOldIds.has(column.id))
+      .forEach((column) => archiveColumn(template, column));
     state.records.forEach((record) => {
       nextColumns.forEach((column) => {
         if (!(column.id in record.values)) {
           record.values[column.id] = "";
-        }
-      });
-      Object.keys(record.values).forEach((key) => {
-        if (!nextIds.has(key)) {
-          delete record.values[key];
         }
       });
       record.updatedAt = nowIso();
@@ -1171,12 +1228,14 @@
             return recordTime(record, template);
           }
           if (column.id === dateColumn?.id) {
-            return record.values?.[column.id] || inferRecordDate(record, template);
+            const value = record.values?.[column.id];
+            return String(value ?? "").trim() ? value : inferRecordDate(record, template);
           }
           if (column.id === timeColumn?.id) {
-            return record.values?.[column.id] || recordTime(record, template);
+            const value = record.values?.[column.id];
+            return String(value ?? "").trim() ? value : recordTime(record, template);
           }
-          return record.values?.[column.id] || "";
+          return record.values?.[column.id] ?? "";
         })
       ),
     ];
@@ -1250,6 +1309,9 @@
       }
     }
 
+    if (inQuotes) {
+      throw new Error("CSV 中存在未闭合的引号");
+    }
     if (cell.length > 0 || row.length > 0) {
       row.push(cell);
       rows.push(row);
@@ -1269,6 +1331,10 @@
           showToast("CSV 文件是空的");
           return;
         }
+        const headerWidth = rows[0].length;
+        if (rows.slice(1).some((row) => row.length > headerWidth)) {
+          throw new Error("CSV 数据列数超过表头列数");
+        }
         state.importRows = rows;
         state.importFileName = file.name;
         els.importSummary.textContent = `文件「${file.name}」包含 ${Math.max(rows.length - 1, 0)} 条数据。`;
@@ -1282,6 +1348,18 @@
     els.csvFileInput.value = "";
   }
 
+  function findImportColumn(header, template) {
+    const exact = template.columns.find((column) => column.name === header);
+    if (exact) return exact;
+    const inferredRole = inferAnalyticsForColumn({ name: header }).role;
+    if (inferredRole === "none") return null;
+    const compatible = template.columns.filter((column) => {
+      const setting = state.analytics.columns[column.id] || inferAnalyticsForColumn(column);
+      return setting.role === inferredRole;
+    });
+    return compatible.length === 1 ? compatible[0] : null;
+  }
+
   function confirmImport() {
     if (state.importRows.length === 0) {
       return false;
@@ -1293,21 +1371,27 @@
     );
     const dataRows = state.importRows.slice(1);
     const importedDateIndex = headers.findIndex((header) => header.includes("日期"));
+    const usedColumnIds = new Set();
     let columns;
 
     if (mode === "replace") {
       columns = headers.map((header) => {
-        const existing = template.columns.find((column) => column.name === header);
-        return existing || { id: uid("col"), name: header };
+        let existing = findImportColumn(header, template);
+        if (existing && usedColumnIds.has(existing.id)) existing = null;
+        const column = existing || { id: uid("col"), name: header };
+        usedColumnIds.add(column.id);
+        return column;
       });
       template.columns = columns;
     } else {
       columns = headers.map((header) => {
-        let existing = template.columns.find((column) => column.name === header);
+        let existing = findImportColumn(header, template);
+        if (existing && usedColumnIds.has(existing.id)) existing = null;
         if (!existing) {
           existing = { id: uid("col"), name: uniqueColumnName(header, template.columns) };
           template.columns.push(existing);
         }
+        usedColumnIds.add(existing.id);
         return existing;
       });
     }
@@ -1318,7 +1402,7 @@
         values[column.id] = "";
       });
       columns.forEach((column, index) => {
-        values[column.id] = row[index] || "";
+        values[column.id] = row[index] ?? "";
       });
       return {
         id: uid("row"),
@@ -1474,13 +1558,30 @@
       if (ids.has(template.id)) return "备份中有重复模板";
       ids.add(template.id);
       if (!template.columns.every((column) => column?.id && typeof column.name === "string")) return "模板列结构不完整";
+      const archivedColumns = Array.isArray(template.archivedColumns) ? template.archivedColumns : [];
+      if (!archivedColumns.every((column) => column?.id && typeof column.name === "string")) {
+        return "归档列结构不完整";
+      }
+      const columnIds = [...template.columns, ...archivedColumns].map((column) => column.id);
+      if (new Set(columnIds).size !== columnIds.length) return "模板中有重复列";
       const records = backup.recordsByTemplate?.[template.id];
       if (!Array.isArray(records)) return "记录结构不完整";
-      if (!records.every((record) => record && typeof record === "object" && record.values && typeof record.values === "object")) {
+      if (!records.every((record) =>
+        record?.id &&
+        record.values &&
+        typeof record.values === "object" &&
+        !Array.isArray(record.values)
+      )) {
         return "记录内容结构不完整";
       }
+      if (new Set(records.map((record) => record.id)).size !== records.length) return "记录中有重复 ID";
       const analytics = backup.analyticsByTemplate?.[template.id];
-      if (analytics && (typeof analytics !== "object" || typeof analytics.columns !== "object")) {
+      if (analytics && (
+        typeof analytics !== "object" ||
+        !analytics.columns ||
+        typeof analytics.columns !== "object" ||
+        Array.isArray(analytics.columns)
+      )) {
         return "分析设置结构不完整";
       }
     }
@@ -1811,7 +1912,16 @@
     return String(Number(value.toFixed(1)));
   }
 
-  function drawNativeChart(canvas, labels, values, role, setting, compact, ranges = null) {
+  function drawNativeChart(
+    canvas,
+    labels,
+    values,
+    role,
+    setting,
+    compact,
+    ranges = null,
+    inspection = null
+  ) {
     const { context, width, height } = prepareCanvas(canvas);
     const meta = AXIS_META[role];
     const domainValues = ranges
@@ -1911,20 +2021,202 @@
       }
     });
     context.restore();
+    updateChartInspector(canvas, {
+      compact,
+      labels: inspection?.labels || labels,
+      values: plottedValues,
+      ranges,
+      role,
+      domain,
+      padding,
+      width,
+      height,
+      valueLabel: inspection?.valueLabel || AXIS_META[role].label,
+      secondaryValues: inspection?.secondaryValues || null,
+      secondaryLabel: inspection?.secondaryLabel || "",
+    });
   }
 
-  function makeLineChart(key, canvas, labels, values, role, compact = false) {
+  function formatInspectorValue(value) {
+    return Number.isFinite(value) ? Number(value.toFixed(1)).toString() : "-";
+  }
+
+  function ensureChartInspector(canvas) {
+    if (canvas._chartInspector) return canvas._chartInspector;
+    const frame = canvas.parentElement;
+    const root = document.createElement("div");
+    root.className = "chart-inspector";
+    root.setAttribute("aria-live", "polite");
+    const line = document.createElement("span");
+    line.className = "chart-inspector-line";
+    const dot = document.createElement("span");
+    dot.className = "chart-inspector-dot";
+    const tooltip = document.createElement("span");
+    tooltip.className = "chart-inspector-tooltip";
+    const label = document.createElement("strong");
+    const value = document.createElement("span");
+    const secondary = document.createElement("small");
+    tooltip.append(label, value, secondary);
+    root.append(line, dot, tooltip);
+    frame.append(root);
+    const ui = { root, line, dot, tooltip, label, value, secondary };
+    canvas._chartInspector = ui;
+
+    const inspectPointer = (event) => {
+      const model = canvas._chartInspectionModel;
+      if (!model?.labels.length) return;
+      const rect = canvas.getBoundingClientRect();
+      const chartWidth = Math.max(model.width - model.padding.left - model.padding.right, 1);
+      const localX = event.clientX - rect.left;
+      const ratio = Math.min(
+        Math.max((localX - model.padding.left) / chartWidth, 0),
+        1
+      );
+      const index = model.labels.length <= 1
+        ? 0
+        : Math.round(ratio * (model.labels.length - 1));
+      showChartInspection(canvas, index);
+    };
+    canvas.addEventListener("pointerdown", inspectPointer);
+    canvas.addEventListener("pointermove", (event) => {
+      if (event.pointerType === "mouse" || event.buttons > 0) {
+        inspectPointer(event);
+      }
+    });
+    canvas.addEventListener("pointerleave", (event) => {
+      if (event.pointerType === "mouse") root.classList.remove("visible");
+    });
+    canvas.addEventListener("focus", () => {
+      const model = canvas._chartInspectionModel;
+      if (!model?.labels.length) return;
+      const fallback = model.values.reduce(
+        (latest, item, index) => Number.isFinite(item) ? index : latest,
+        model.labels.length - 1
+      );
+      showChartInspection(canvas, model.lastIndex ?? Math.max(fallback, 0));
+    });
+    canvas.addEventListener("blur", () => root.classList.remove("visible"));
+    canvas.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const model = canvas._chartInspectionModel;
+      if (!model?.labels.length) return;
+      event.preventDefault();
+      let index = model.lastIndex ?? model.labels.length - 1;
+      if (event.key === "ArrowLeft") index -= 1;
+      if (event.key === "ArrowRight") index += 1;
+      if (event.key === "Home") index = 0;
+      if (event.key === "End") index = model.labels.length - 1;
+      showChartInspection(canvas, Math.min(Math.max(index, 0), model.labels.length - 1));
+    });
+    return ui;
+  }
+
+  function showChartInspection(canvas, index) {
+    const model = canvas._chartInspectionModel;
+    if (!model || index < 0 || index >= model.labels.length) return;
+    const ui = ensureChartInspector(canvas);
+    document.querySelectorAll(".chart-inspector.visible").forEach((inspector) => {
+      if (inspector !== ui.root) inspector.classList.remove("visible");
+    });
+    model.lastIndex = index;
+    const chartWidth = Math.max(model.width - model.padding.left - model.padding.right, 1);
+    const chartHeight = Math.max(model.height - model.padding.top - model.padding.bottom, 1);
+    const x = model.padding.left + (
+      model.labels.length <= 1
+        ? chartWidth / 2
+        : (index / (model.labels.length - 1)) * chartWidth
+    );
+    const frameRect = canvas.parentElement.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    const left = canvasRect.left - frameRect.left + x;
+    const top = canvasRect.top - frameRect.top + model.padding.top;
+    const value = model.values[index];
+    const range = model.ranges?.[index];
+    const secondaryValue = model.secondaryValues?.[index];
+
+    ui.label.textContent = String(model.labels[index]);
+    if (Number.isFinite(value)) {
+      ui.value.textContent = range
+        ? `${model.valueLabel} ${formatInspectorValue(value)} · ${formatInspectorValue(range.min)}～${formatInspectorValue(range.max)}`
+        : `${model.valueLabel} ${formatInspectorValue(value)}`;
+    } else {
+      ui.value.textContent = `${model.valueLabel} 无有效记录`;
+    }
+    if (model.secondaryLabel) {
+      ui.secondary.textContent = Number.isFinite(secondaryValue)
+        ? `${model.secondaryLabel} ${formatInspectorValue(secondaryValue)}`
+        : `${model.secondaryLabel} 无有效记录`;
+      ui.secondary.classList.remove("hidden");
+    } else {
+      ui.secondary.textContent = "";
+      ui.secondary.classList.add("hidden");
+    }
+
+    ui.line.style.left = `${left}px`;
+    ui.line.style.top = `${top}px`;
+    ui.line.style.height = `${chartHeight}px`;
+    if (Number.isFinite(value)) {
+      const clamped = Math.min(Math.max(value, model.domain.min), model.domain.max);
+      const y = model.padding.top +
+        ((model.domain.max - clamped) / (model.domain.max - model.domain.min)) * chartHeight;
+      ui.dot.style.left = `${left}px`;
+      ui.dot.style.top = `${canvasRect.top - frameRect.top + y}px`;
+      ui.dot.style.background = AXIS_META[model.role].color;
+      ui.dot.classList.remove("hidden");
+    } else {
+      ui.dot.classList.add("hidden");
+    }
+    ui.root.classList.add("visible");
+    ui.tooltip.style.top = `${canvasRect.top - frameRect.top + 6}px`;
+    const tooltipWidth = ui.tooltip.offsetWidth;
+    const tooltipLeft = Math.min(
+      Math.max(left - tooltipWidth / 2, 4),
+      Math.max(frameRect.width - tooltipWidth - 4, 4)
+    );
+    ui.tooltip.style.left = `${tooltipLeft}px`;
+  }
+
+  function updateChartInspector(canvas, model) {
+    if (model.compact) {
+      canvas._chartInspectionModel = null;
+      canvas._chartInspector?.root.classList.remove("visible");
+      canvas.removeAttribute("tabindex");
+      return;
+    }
+    canvas._chartInspectionModel = model;
+    canvas.tabIndex = 0;
+    canvas.style.touchAction = "pan-y";
+    if (!canvas.dataset.inspectorBaseLabel) {
+      canvas.dataset.inspectorBaseLabel =
+        canvas.getAttribute("aria-label") || `${AXIS_META[model.role].label}趋势`;
+    }
+    canvas.setAttribute(
+      "aria-label",
+      `${canvas.dataset.inspectorBaseLabel}，触摸或使用左右方向键查看具体日期和数值`
+    );
+    ensureChartInspector(canvas).root.classList.remove("visible");
+  }
+
+  function makeLineChart(
+    key,
+    canvas,
+    labels,
+    values,
+    role,
+    compact = false,
+    inspection = null
+  ) {
     destroyChart(key);
     if (!canvas) return;
     const column = getColumnByRole(role);
     const setting = role === "state"
       ? { min: 0, max: 100 }
       : (column ? getAnalyticsSetting(column.id) : { min: 0, max: 10 });
-    drawNativeChart(canvas, labels, values, role, setting, compact);
+    drawNativeChart(canvas, labels, values, role, setting, compact, null, inspection);
     state.charts[key] = { destroy() {} };
   }
 
-  function makeRangeChart(key, canvas, labels, aggregates, role) {
+  function makeRangeChart(key, canvas, labels, aggregates, role, inspection = null) {
     destroyChart(key);
     if (!canvas) return;
     const column = getColumnByRole(role);
@@ -1938,7 +2230,8 @@
       role,
       setting,
       false,
-      aggregates
+      aggregates,
+      inspection
     );
     state.charts[key] = { destroy() {} };
   }
@@ -1973,15 +2266,24 @@
     els.overviewStateCoverage.textContent =
       `${summary.valid.length}/${days} 个有效日${indicatorCoverage}`;
     const dates = dateValues(state.selectedDate, days);
+    const chartValues = days === 56
+      ? rollingStateValues(summary.daily)
+      : summary.daily.map((item) => item?.score ?? null);
     makeLineChart(
       "overviewState",
       els.overviewStateCanvas,
       dates.map((date) => date.slice(5)),
-      days === 56
-        ? rollingStateValues(summary.daily)
-        : summary.daily.map((item) => item?.score ?? null),
+      chartValues,
       "state",
-      false
+      false,
+      {
+        labels: dates,
+        valueLabel: days === 56 ? "14 天滚动均值" : "状态指数",
+        secondaryValues: days === 56
+          ? summary.daily.map((item) => item?.score ?? null)
+          : null,
+        secondaryLabel: days === 56 ? "当日状态" : "",
+      }
     );
   }
 
@@ -2005,7 +2307,8 @@
         timeline.map((item) => item.label),
         values,
         "state",
-        false
+        false,
+        { valueLabel: "状态指数" }
       );
       return;
     }
@@ -2020,15 +2323,24 @@
         days === 56 ? "曲线为 14 天滚动均值" : "每日按时段等权"
       }${indicatorCoverage}`;
     const dates = dateValues(state.selectedDate, days);
+    const chartValues = days === 56
+      ? rollingStateValues(summary.daily)
+      : summary.daily.map((item) => item?.score ?? null);
     makeLineChart(
       "state",
       els.stateCanvas,
       dates.map((date) => date.slice(5)),
-      days === 56
-        ? rollingStateValues(summary.daily)
-        : summary.daily.map((item) => item?.score ?? null),
+      chartValues,
       "state",
-      false
+      false,
+      {
+        labels: dates,
+        valueLabel: days === 56 ? "14 天滚动均值" : "状态指数",
+        secondaryValues: days === 56
+          ? summary.daily.map((item) => item?.score ?? null)
+          : null,
+        secondaryLabel: days === 56 ? "当日状态" : "",
+      }
     );
   }
 
@@ -2076,7 +2388,14 @@
     if (days > 1) {
       const dates = dateValues(state.selectedDate, days);
       const aggregates = aggregateRole(role, dates);
-      makeRangeChart(key, canvas, dates.map((date) => date.slice(5)), aggregates, role);
+      makeRangeChart(
+        key,
+        canvas,
+        dates.map((date) => date.slice(5)),
+        aggregates,
+        role,
+        { labels: dates }
+      );
       return aggregates.some(Boolean);
     }
     const timeline = dailyTimeline();
@@ -2094,7 +2413,7 @@
       state.records
         .filter((record) => dates.includes(inferRecordDate(record)))
         .forEach((record) => {
-          const value = String(record.values?.[column.id] || "").trim();
+          const value = String(record.values?.[column.id] ?? "").trim();
           if (!value) return;
           entries.push({
             date: inferRecordDate(record),
@@ -2220,7 +2539,11 @@
     });
     const notes = [];
     notes.push(personalScale ? "个人缩放参考最近 14 天" : "固定量表便于跨月比较");
-    if (outsideCount > 0) notes.push(`${outsideCount} 个越界值已自动扩展显示`);
+    if (outsideCount > 0) {
+      notes.push(personalScale
+        ? `${outsideCount} 个越界值已自动扩展显示`
+        : `${outsideCount} 个越界值超出固定量表，图中按边界裁剪`);
+    }
     if (invalidCount > 0) notes.push(`${invalidCount} 个非数值内容未绘制`);
     els.trendCoverage.textContent = [coverageText, ...notes].join(" · ");
     els.trendNoData.classList.toggle("hidden", hasData);

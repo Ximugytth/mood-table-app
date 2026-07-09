@@ -1,9 +1,9 @@
-const CACHE_NAME = "mood-table-app-v8-4-dynamics-20260709-r1";
+const CACHE_NAME = "mood-table-app-v8-5-dynamics-visual-20260709-r1";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=8.4",
-  "./app.js?v=8.4",
+  "./styles.css?v=8.5",
+  "./app.js?v=8.5",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",

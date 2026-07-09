@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=8.4" />
+    <link rel="stylesheet" href="./styles.css?v=8.5" />
   </head>
   <body>
     <div class="app-shell">
@@ -273,6 +273,16 @@
               <article><span>最大日内波动</span><strong id="dynamicsMaxSwing">-</strong></article>
               <article><span>平均跳变</span><strong id="dynamicsMeanJump">-</strong></article>
             </div>
+            <div class="dynamics-visuals">
+              <article>
+                <strong>稳定性条带</strong>
+                <div id="dynamicsStabilityStrip" class="stability-strip" aria-label="每日稳定性条带"></div>
+              </article>
+              <article>
+                <strong>恢复路径</strong>
+                <div id="dynamicsRecoveryPath" class="recovery-path" aria-label="低点后的恢复路径"></div>
+              </article>
+            </div>
             <div class="dynamics-grid">
               <article>
                 <strong>恢复时间</strong>
@@ -387,6 +397,6 @@
     </dialog>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=8.4" defer></script>
+    <script src="./app.js?v=8.5" defer></script>
   </body>
 </html>

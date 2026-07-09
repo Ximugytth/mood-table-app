@@ -8,7 +8,13 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "8.4";
+  const APP_VERSION = "8.5";
+  const DYNAMICS_THRESHOLDS = {
+    dailySwingStable: 18,
+    dailySwingHigh: 35,
+    jumpNotice: 12,
+    jumpHigh: 25,
+  };
   const BACKUP_SCHEMA = "mood-table-backup";
   const ROLE_OPTIONS = [
     ["none", "不绘图"],
@@ -150,6 +156,8 @@
     dynamicsMaxSwing: document.getElementById("dynamicsMaxSwing"),
     dynamicsMeanJump: document.getElementById("dynamicsMeanJump"),
     dynamicsRecovery: document.getElementById("dynamicsRecovery"),
+    dynamicsRecoveryPath: document.getElementById("dynamicsRecoveryPath"),
+    dynamicsStabilityStrip: document.getElementById("dynamicsStabilityStrip"),
     dynamicsDataQuality: document.getElementById("dynamicsDataQuality"),
     dynamicsEventList: document.getElementById("dynamicsEventList"),
     dynamicsPatternList: document.getElementById("dynamicsPatternList"),
@@ -1899,11 +1907,22 @@
     const swings = [];
     byDate.forEach((scores, date) => {
       if (scores.length < 2) return;
+      const low = scores.reduce(
+        (best, score, index) => score < best.score ? { score, index } : best,
+        { score: scores[0], index: 0 }
+      );
+      const high = scores.reduce(
+        (best, score, index) => score > best.score ? { score, index } : best,
+        { score: scores[0], index: 0 }
+      );
       swings.push({
         date,
         swing: Math.max(...scores) - Math.min(...scores),
         min: Math.min(...scores),
         max: Math.max(...scores),
+        count: scores.length,
+        lowIndex: low.index,
+        highIndex: high.index,
       });
     });
     return swings;
@@ -1944,6 +1963,10 @@
       return {
         text: `${low.date.slice(5)} ${low.time} 低点 ${formatStateScore(low.state.score)}，窗口内未回到 ${formatStateScore(target)}`,
         hours: null,
+        low,
+        recovered: null,
+        target,
+        path: timeline.slice(startIndex, Math.min(startIndex + 6, timeline.length)),
       };
     }
     const hours = (recovered.minutes - low.minutes) / 60;
@@ -1953,7 +1976,68 @@
     return {
       text: `${low.date.slice(5)} ${low.time} 后约 ${timeText} 回到 ${formatStateScore(target)}`,
       hours,
+      low,
+      recovered,
+      target,
+      path: timeline.slice(startIndex, timeline.indexOf(recovered) + 1),
     };
+  }
+
+  function dailyStateRange(date) {
+    const points = rangeStateTimeline([date]);
+    if (!points.length) return null;
+    const scores = points.map((item) => item.state.score);
+    return {
+      date,
+      mean: meanFinite(scores),
+      min: Math.min(...scores),
+      max: Math.max(...scores),
+      count: scores.length,
+      points,
+    };
+  }
+
+  function dynamicsSeverity(value, stableThreshold, highThreshold) {
+    if (!Number.isFinite(value)) return "missing";
+    if (value < stableThreshold) return "stable";
+    if (value <= highThreshold) return "medium";
+    return "high";
+  }
+
+  function dailyDynamics(dates, daily, swings) {
+    const swingByDate = new Map(swings.map((item) => [item.date, item]));
+    return dates.map((date, index) => {
+      const stateDay = daily[index];
+      const range = dailyStateRange(date);
+      const swing = swingByDate.get(date);
+      const swingValue = swing?.swing ?? (range && range.count > 1 ? range.max - range.min : null);
+      return {
+        date,
+        score: stateDay?.score ?? null,
+        range,
+        swing: swingValue,
+        count: range?.count ?? 0,
+        severity: dynamicsSeverity(
+          swingValue,
+          DYNAMICS_THRESHOLDS.dailySwingStable,
+          DYNAMICS_THRESHOLDS.dailySwingHigh
+        ),
+      };
+    });
+  }
+
+  function jumpMarkers(jumps) {
+    return jumps
+      .filter((item) => item.jump >= DYNAMICS_THRESHOLDS.jumpNotice)
+      .map((item) => ({
+        date: item.to.date,
+        fromDate: item.from.date,
+        fromTime: item.from.time,
+        toTime: item.to.time,
+        value: item.to.state.score,
+        jump: item.jump,
+        severity: item.jump > DYNAMICS_THRESHOLDS.jumpHigh ? "high" : "medium",
+      }));
   }
 
   function dimensionPatterns(timeline) {
@@ -2051,6 +2135,8 @@
       recovery: recoverySummary(timeline, average, deviation),
       events: dynamicEventList(timeline, jumps, average, deviation),
       patterns: dimensionPatterns(timeline),
+      daily: dailyDynamics(dates, daily, swings),
+      jumps: jumpMarkers(jumps),
       quality,
     };
   }
@@ -2062,6 +2148,55 @@
       const item = document.createElement("li");
       item.textContent = text;
       element.append(item);
+    });
+  }
+
+  function renderStabilityStrip(dynamics) {
+    els.dynamicsStabilityStrip.innerHTML = "";
+    dynamics.daily.forEach((day) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = `stability-day ${day.severity}`;
+      const label = day.date.slice(5);
+      item.innerHTML = `<span>${label}</span><strong>${
+        Number.isFinite(day.swing) ? day.swing.toFixed(0) : "-"
+      }</strong>`;
+      const title = day.severity === "missing"
+        ? `${day.date} 数据不足`
+        : `${day.date} · 日内波动 ${day.swing.toFixed(1)} · ${day.count} 个时间点`;
+      item.title = title;
+      item.setAttribute("aria-label", title);
+      item.addEventListener("click", () => showToast(title));
+      els.dynamicsStabilityStrip.append(item);
+    });
+  }
+
+  function renderRecoveryPath(recovery) {
+    els.dynamicsRecoveryPath.innerHTML = "";
+    if (!recovery?.path?.length) {
+      const empty = document.createElement("span");
+      empty.className = "recovery-empty";
+      empty.textContent = "暂无可绘制恢复路径";
+      els.dynamicsRecoveryPath.append(empty);
+      return;
+    }
+    const path = recovery.path.slice(0, 8);
+    path.forEach((point, index) => {
+      const node = document.createElement("span");
+      node.className = "recovery-point";
+      const isLow = point === recovery.low;
+      const isRecovered = point === recovery.recovered;
+      node.classList.toggle("low", isLow);
+      node.classList.toggle("recovered", isRecovered);
+      node.style.setProperty("--score", String(clamp(point.state.score, 0, 100)));
+      node.innerHTML = `<i></i><small>${point.date.slice(5)} ${point.time}<br>${formatStateScore(point.state.score)}</small>`;
+      node.title = `${point.date} ${point.time} · 状态 ${formatStateScore(point.state.score)}`;
+      els.dynamicsRecoveryPath.append(node);
+      if (index < path.length - 1) {
+        const line = document.createElement("span");
+        line.className = "recovery-line";
+        els.dynamicsRecoveryPath.append(line);
+      }
     });
   }
 
@@ -2078,6 +2213,8 @@
       ? dynamics.meanJump.toFixed(1)
       : "-";
     els.dynamicsRecovery.textContent = dynamics.recovery?.text || "当前窗口未形成可判断低点";
+    renderStabilityStrip(dynamics);
+    renderRecoveryPath(dynamics.recovery);
     renderList(els.dynamicsDataQuality, dynamics.quality, "暂无足够数据");
     renderList(els.dynamicsEventList, dynamics.events, "暂无明显低点或大幅跳变");
     renderList(
@@ -2262,7 +2399,7 @@
       context.lineCap = "butt";
     }
 
-    const plottedValues = ranges ? ranges.map((item) => item?.mean ?? null) : values;
+    const plottedValues = values;
     context.strokeStyle = meta.color;
     context.fillStyle = meta.color;
     context.lineWidth = compact ? 2 : 2.5;
@@ -2299,6 +2436,29 @@
         context.strokeStyle = meta.color;
       }
     });
+    if (!compact && inspection?.markers?.length) {
+      inspection.markers.forEach((marker) => {
+        if (!Number.isFinite(marker.index) || marker.index < 0 || marker.index >= labels.length) return;
+        const value = Number.isFinite(marker.value)
+          ? marker.value
+          : plottedValues[marker.index];
+        if (!Number.isFinite(value)) return;
+        const x = xAt(marker.index);
+        const y = yAt(value);
+        context.save();
+        context.fillStyle = marker.severity === "high" ? "#d94b3d" : "#d89424";
+        context.strokeStyle = "#ffffff";
+        context.lineWidth = 1.5;
+        context.beginPath();
+        context.moveTo(x, y - 9);
+        context.lineTo(x + 6, y + 4);
+        context.lineTo(x - 6, y + 4);
+        context.closePath();
+        context.fill();
+        context.stroke();
+        context.restore();
+      });
+    }
     context.restore();
     updateChartInspector(canvas, {
       compact,
@@ -2515,6 +2675,22 @@
     state.charts[key] = { destroy() {} };
   }
 
+  function makeStateDynamicsChart(key, canvas, labels, values, ranges, markers, inspection = null) {
+    destroyChart(key);
+    if (!canvas) return;
+    drawNativeChart(
+      canvas,
+      labels,
+      values,
+      "state",
+      { min: 0, max: 100 },
+      false,
+      ranges,
+      { ...(inspection || {}), markers }
+    );
+    state.charts[key] = { destroy() {} };
+  }
+
   function formatStateScore(value) {
     return Number.isFinite(value) ? value.toFixed(1) : "-";
   }
@@ -2602,16 +2778,24 @@
         days === 56 ? "曲线为 14 天滚动均值" : "每日按时段等权"
       }${indicatorCoverage}`;
     const dates = dateValues(state.selectedDate, days);
+    const dynamics = computeDynamics(dates);
     const chartValues = days === 56
       ? rollingStateValues(summary.daily)
       : summary.daily.map((item) => item?.score ?? null);
-    makeLineChart(
+    const ranges = dynamics.daily.map((item) => item.range
+      ? { min: item.range.min, max: item.range.max, mean: item.range.mean }
+      : null);
+    const markers = dynamics.jumps.map((item) => ({
+      ...item,
+      index: dates.indexOf(item.date),
+    }));
+    makeStateDynamicsChart(
       "state",
       els.stateCanvas,
       dates.map((date) => date.slice(5)),
       chartValues,
-      "state",
-      false,
+      ranges,
+      markers,
       {
         labels: dates,
         valueLabel: days === 56 ? "14 天滚动均值" : "状态指数",

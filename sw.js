@@ -1,9 +1,9 @@
-const CACHE_NAME = "mood-table-app-v8-3-chart-inspector-20260704-r1";
+const CACHE_NAME = "mood-table-app-v8-4-dynamics-20260709-r1";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=8.3",
-  "./app.js?v=8.3",
+  "./styles.css?v=8.4",
+  "./app.js?v=8.4",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",

@@ -942,6 +942,7 @@ textarea {
 
 .axis-chart-list,
 .state-trend-section,
+.dynamics-section,
 .context-section,
 .pain-section {
   width: min(1040px, calc(100% - 28px));
@@ -989,6 +990,88 @@ textarea {
 
 .state-main-chart {
   height: 250px;
+}
+
+.dynamics-section {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.dynamics-section .section-heading {
+  border-bottom: 1px solid var(--soft-line);
+  padding: 12px 14px;
+}
+
+.dynamics-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--soft-line);
+}
+
+.dynamics-metrics article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border-right: 1px solid var(--soft-line);
+  padding: 12px 14px;
+}
+
+.dynamics-metrics article:last-child {
+  border-right: 0;
+}
+
+.dynamics-metrics span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dynamics-metrics strong {
+  color: var(--accent-dark);
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.dynamics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dynamics-grid article {
+  min-width: 0;
+  border-right: 1px solid var(--soft-line);
+  border-bottom: 1px solid var(--soft-line);
+  padding: 14px;
+}
+
+.dynamics-grid article:nth-child(2n) {
+  border-right: 0;
+}
+
+.dynamics-grid article:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.dynamics-grid strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.dynamics-grid p,
+.dynamics-grid ul {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.dynamics-grid ul {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
 }
 
 .axis-chart-list {
@@ -1405,9 +1488,37 @@ textarea {
 
   .axis-chart-list,
   .state-trend-section,
+  .dynamics-section,
   .context-section,
   .pain-section {
     width: calc(100% - 20px);
+  }
+
+  .dynamics-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dynamics-metrics article:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .dynamics-metrics article:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--soft-line);
+  }
+
+  .dynamics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dynamics-grid article,
+  .dynamics-grid article:nth-child(2n),
+  .dynamics-grid article:nth-last-child(-n + 2) {
+    border-right: 0;
+    border-bottom: 1px solid var(--soft-line);
+  }
+
+  .dynamics-grid article:last-child {
+    border-bottom: 0;
   }
 
   .chart-frame {

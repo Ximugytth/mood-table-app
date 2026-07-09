@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=8.3" />
+    <link rel="stylesheet" href="./styles.css?v=8.4" />
   </head>
   <body>
     <div class="app-shell">
@@ -260,6 +260,39 @@
             <div class="chart-frame state-main-chart"><canvas id="stateCanvas"></canvas></div>
           </section>
 
+          <section class="dynamics-section" aria-label="情绪动力学分析">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">动力学</span>
+                <h3>状态稳定性</h3>
+              </div>
+            </div>
+            <div class="dynamics-metrics">
+              <article><span>平均状态</span><strong id="dynamicsAverage">-</strong></article>
+              <article><span>稳定性</span><strong id="dynamicsStability">-</strong></article>
+              <article><span>最大日内波动</span><strong id="dynamicsMaxSwing">-</strong></article>
+              <article><span>平均跳变</span><strong id="dynamicsMeanJump">-</strong></article>
+            </div>
+            <div class="dynamics-grid">
+              <article>
+                <strong>恢复时间</strong>
+                <p id="dynamicsRecovery">等待足够数据</p>
+              </article>
+              <article>
+                <strong>数据质量</strong>
+                <ul id="dynamicsDataQuality"></ul>
+              </article>
+              <article>
+                <strong>时间列表</strong>
+                <ul id="dynamicsEventList"></ul>
+              </article>
+              <article>
+                <strong>维度组合模式</strong>
+                <ul id="dynamicsPatternList"></ul>
+              </article>
+            </div>
+          </section>
+
           <section class="axis-chart-list" aria-label="三轴趋势图">
             <article class="axis-chart">
               <div class="axis-chart-heading"><div><strong>愉快</strong><span>效价 · 消极到积极</span></div><span id="valenceRangeLabel">-5 ～ 5</span></div>
@@ -354,6 +387,6 @@
     </dialog>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=8.3" defer></script>
+    <script src="./app.js?v=8.4" defer></script>
   </body>
 </html>

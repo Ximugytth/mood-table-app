@@ -8,7 +8,7 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "8.3";
+  const APP_VERSION = "8.4";
   const BACKUP_SCHEMA = "mood-table-backup";
   const ROLE_OPTIONS = [
     ["none", "不绘图"],
@@ -145,6 +145,14 @@
     trendStateScore: document.getElementById("trendStateScore"),
     trendStateDelta: document.getElementById("trendStateDelta"),
     trendStateSummary: document.getElementById("trendStateSummary"),
+    dynamicsAverage: document.getElementById("dynamicsAverage"),
+    dynamicsStability: document.getElementById("dynamicsStability"),
+    dynamicsMaxSwing: document.getElementById("dynamicsMaxSwing"),
+    dynamicsMeanJump: document.getElementById("dynamicsMeanJump"),
+    dynamicsRecovery: document.getElementById("dynamicsRecovery"),
+    dynamicsDataQuality: document.getElementById("dynamicsDataQuality"),
+    dynamicsEventList: document.getElementById("dynamicsEventList"),
+    dynamicsPatternList: document.getElementById("dynamicsPatternList"),
     stateCanvas: document.getElementById("stateCanvas"),
     valenceCanvas: document.getElementById("valenceCanvas"),
     energyCanvas: document.getElementById("energyCanvas"),
@@ -1808,6 +1816,277 @@
     };
   }
 
+  function standardDeviation(values) {
+    const finite = values.filter(Number.isFinite);
+    if (finite.length < 2) return 0;
+    const mean = meanFinite(finite);
+    const variance = meanFinite(finite.map((value) => (value - mean) ** 2));
+    return Math.sqrt(variance);
+  }
+
+  function dateTimeMinutes(record) {
+    const date = inferRecordDate(record);
+    const match = recordTime(record).match(/^(\d{1,2}):(\d{2})/);
+    const base = Date.UTC(
+      ...date.split("-").map((part, index) => index === 1 ? Number(part) - 1 : Number(part))
+    ) / 60000;
+    return base + (match ? Number(match[1]) * 60 + Number(match[2]) : 23 * 60 + 59);
+  }
+
+  function rangeRecords(dates) {
+    const dateSet = new Set(dates);
+    return state.records
+      .filter((record) => dateSet.has(inferRecordDate(record)))
+      .map((record, index) => ({ record, index }))
+      .sort((a, b) =>
+        dateTimeMinutes(a.record) - dateTimeMinutes(b.record) || a.index - b.index
+      );
+  }
+
+  function rangeStateTimeline(dates) {
+    return rangeRecords(dates)
+      .map((item) => ({
+        record: item.record,
+        date: inferRecordDate(item.record),
+        time: recordTime(item.record) || "--:--",
+        minutes: dateTimeMinutes(item.record),
+        state: stateValue(item.record),
+      }))
+      .filter((item) => item.state);
+  }
+
+  function rolePercent(record, role) {
+    const column = getColumnByRole(role);
+    const value = numericValue(record, role);
+    if (!column || value === null) return null;
+    const setting = getAnalyticsSetting(column.id);
+    const min = Number.isFinite(Number(setting.min)) ? Number(setting.min) : 0;
+    const max = Number.isFinite(Number(setting.max)) ? Number(setting.max) : 10;
+    if (max <= min) return null;
+    return clamp(((value - min) / (max - min)) * 100, 0, 100);
+  }
+
+  function activityText(record) {
+    const column = getColumnByRole("activity");
+    return column ? String(record.values?.[column.id] ?? "").trim() : "";
+  }
+
+  function ruminationText(record) {
+    const column = getColumnByRole("rumination");
+    return column ? String(record.values?.[column.id] ?? "").trim() : "";
+  }
+
+  function longestMissingRun(daily) {
+    let current = 0;
+    let longest = 0;
+    daily.forEach((item) => {
+      if (item) {
+        current = 0;
+        return;
+      }
+      current += 1;
+      longest = Math.max(longest, current);
+    });
+    return longest;
+  }
+
+  function daySwingMap(timeline) {
+    const byDate = new Map();
+    timeline.forEach((item) => {
+      if (!byDate.has(item.date)) byDate.set(item.date, []);
+      byDate.get(item.date).push(item.state.score);
+    });
+    const swings = [];
+    byDate.forEach((scores, date) => {
+      if (scores.length < 2) return;
+      swings.push({
+        date,
+        swing: Math.max(...scores) - Math.min(...scores),
+        min: Math.min(...scores),
+        max: Math.max(...scores),
+      });
+    });
+    return swings;
+  }
+
+  function adjacentJumps(timeline) {
+    const jumps = [];
+    for (let index = 1; index < timeline.length; index += 1) {
+      const previous = timeline[index - 1];
+      const current = timeline[index];
+      const gapHours = (current.minutes - previous.minutes) / 60;
+      if (gapHours < 0 || gapHours > 36) continue;
+      const jump = Math.abs(current.state.score - previous.state.score);
+      jumps.push({
+        from: previous,
+        to: current,
+        jump,
+        gapHours,
+      });
+    }
+    return jumps;
+  }
+
+  function recoverySummary(timeline, average, deviation) {
+    if (timeline.length < 2 || !Number.isFinite(average)) return null;
+    const lowThreshold = Math.min(45, average - Math.max(deviation * 0.5, 8));
+    const target = Math.max(45, average - 5);
+    const candidates = timeline.filter((item) => item.state.score <= lowThreshold);
+    if (!candidates.length) return null;
+    const low = candidates.reduce((min, item) =>
+      item.state.score < min.state.score ? item : min
+    );
+    const startIndex = timeline.indexOf(low);
+    const recovered = timeline
+      .slice(startIndex + 1)
+      .find((item) => item.state.score >= target);
+    if (!recovered) {
+      return {
+        text: `${low.date.slice(5)} ${low.time} 低点 ${formatStateScore(low.state.score)}，窗口内未回到 ${formatStateScore(target)}`,
+        hours: null,
+      };
+    }
+    const hours = (recovered.minutes - low.minutes) / 60;
+    const timeText = hours < 24
+      ? `${hours.toFixed(1)} 小时`
+      : `${(hours / 24).toFixed(1)} 天`;
+    return {
+      text: `${low.date.slice(5)} ${low.time} 后约 ${timeText} 回到 ${formatStateScore(target)}`,
+      hours,
+    };
+  }
+
+  function dimensionPatterns(timeline) {
+    const counts = new Map();
+    timeline.forEach((item) => {
+      const valence = rolePercent(item.record, "valence");
+      const energy = rolePercent(item.record, "energeticArousal");
+      const tension = rolePercent(item.record, "tenseArousal");
+      if (valence === null || energy === null || tension === null) return;
+      const parts = [];
+      parts.push(valence <= 35 ? "低愉快" : (valence >= 65 ? "高愉快" : "中性愉快"));
+      parts.push(energy <= 35 ? "低能量" : (energy >= 65 ? "高能量" : "中等能量"));
+      parts.push(tension >= 65 ? "高紧张担忧" : (tension <= 35 ? "低紧张担忧" : "中等紧张担忧"));
+      const key = parts.join(" + ");
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-CN"))
+      .slice(0, 4)
+      .map(([label, count]) => ({ label, count }));
+  }
+
+  function dynamicEventList(timeline, jumps, average, deviation) {
+    const events = [];
+    const lowThreshold = Number.isFinite(average)
+      ? average - Math.max(deviation * 0.5, 8)
+      : 45;
+    [...timeline]
+      .sort((a, b) => a.state.score - b.state.score)
+      .slice(0, 3)
+      .forEach((item) => {
+        const activity = activityText(item.record);
+        const rumination = ruminationText(item.record);
+        if (item.state.score > lowThreshold && !activity && !rumination) return;
+        events.push({
+          sort: item.minutes,
+          text: `${item.date.slice(5)} ${item.time} · 状态 ${formatStateScore(item.state.score)}${
+            activity ? ` · ${activity}` : ""
+          }${rumination ? ` · 反刍：${rumination}` : ""}`,
+        });
+      });
+    jumps
+      .filter((item) => item.jump >= 20)
+      .sort((a, b) => b.jump - a.jump)
+      .slice(0, 3)
+      .forEach((item) => {
+        events.push({
+          sort: item.to.minutes,
+          text: `${item.from.date.slice(5)} ${item.from.time} → ${item.to.date.slice(5)} ${item.to.time} · 跳变 ${item.jump.toFixed(1)}`,
+        });
+      });
+    return events
+      .sort((a, b) => a.sort - b.sort)
+      .map((item) => item.text)
+      .slice(0, 6);
+  }
+
+  function computeDynamics(dates) {
+    const daily = dates.map((date) => dailyState(date));
+    const validDaily = daily.filter(Boolean);
+    const timeline = rangeStateTimeline(dates);
+    const scores = timeline.map((item) => item.state.score);
+    const average = meanFinite(validDaily.map((item) => item.score));
+    const deviation = standardDeviation(scores);
+    const swings = daySwingMap(timeline);
+    const maxSwing = swings.length
+      ? swings.reduce((max, item) => item.swing > max.swing ? item : max)
+      : null;
+    const jumps = adjacentJumps(timeline);
+    const meanJump = meanFinite(jumps.map((item) => item.jump));
+    const stabilityPenalty = (
+      Math.min(deviation / 25, 1) * 35 +
+      Math.min((meanJump || 0) / 25, 1) * 40 +
+      Math.min((maxSwing?.swing || 0) / 50, 1) * 25
+    );
+    const stability = scores.length >= 2
+      ? clamp(100 - stabilityPenalty, 0, 100)
+      : null;
+    const buckets = new Set(timeline.map((item) => timeBucket(item.record)));
+    const recordDays = new Set(rangeRecords(dates).map((item) => inferRecordDate(item.record))).size;
+    const validDays = new Set(timeline.map((item) => item.date)).size;
+    const quality = [];
+    quality.push(`${validDays}/${dates.length} 个有效状态日，${timeline.length} 个有效时间点`);
+    quality.push(`最长连续缺失 ${longestMissingRun(daily)} 天`);
+    quality.push(`覆盖 ${buckets.size}/4 个常用时段`);
+    if (recordDays > validDays) quality.push(`${recordDays - validDays} 天有记录但缺少核心分数`);
+    if (timeline.length < Math.max(4, Math.ceil(dates.length / 2))) {
+      quality.push("样本偏少，动力学结论只作提示");
+    }
+    return {
+      average,
+      stability,
+      maxSwing,
+      meanJump,
+      recovery: recoverySummary(timeline, average, deviation),
+      events: dynamicEventList(timeline, jumps, average, deviation),
+      patterns: dimensionPatterns(timeline),
+      quality,
+    };
+  }
+
+  function renderList(element, items, emptyText) {
+    element.innerHTML = "";
+    const list = items.length ? items : [emptyText];
+    list.forEach((text) => {
+      const item = document.createElement("li");
+      item.textContent = text;
+      element.append(item);
+    });
+  }
+
+  function renderDynamics(dates) {
+    const dynamics = computeDynamics(dates);
+    els.dynamicsAverage.textContent = formatStateScore(dynamics.average);
+    els.dynamicsStability.textContent = Number.isFinite(dynamics.stability)
+      ? dynamics.stability.toFixed(0)
+      : "-";
+    els.dynamicsMaxSwing.textContent = dynamics.maxSwing
+      ? `${dynamics.maxSwing.swing.toFixed(1)} · ${dynamics.maxSwing.date.slice(5)}`
+      : "-";
+    els.dynamicsMeanJump.textContent = Number.isFinite(dynamics.meanJump)
+      ? dynamics.meanJump.toFixed(1)
+      : "-";
+    els.dynamicsRecovery.textContent = dynamics.recovery?.text || "当前窗口未形成可判断低点";
+    renderList(els.dynamicsDataQuality, dynamics.quality, "暂无足够数据");
+    renderList(els.dynamicsEventList, dynamics.events, "暂无明显低点或大幅跳变");
+    renderList(
+      els.dynamicsPatternList,
+      dynamics.patterns.map((item) => `${item.label} · ${item.count} 次`),
+      "暂无足够三轴数据"
+    );
+  }
+
   function rollingStateValues(daily, windowDays = 14) {
     return daily.map((item, index) => {
       const values = daily
@@ -2512,6 +2791,7 @@
       ? "折线为日均，阴影为当天最低至最高"
       : "共用时间轴，三个维度独立显示";
     renderStateTrend(days);
+    renderDynamics(dates);
 
     const chartMap = [
       ["valence", "valence", els.valenceCanvas, els.valenceRangeLabel],

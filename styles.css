@@ -1005,6 +1005,11 @@ textarea {
   padding: 12px 14px;
 }
 
+.ai-weekly-button {
+  justify-self: end;
+  margin: 10px 14px 12px auto;
+}
+
 .dynamics-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1380,6 +1385,31 @@ textarea {
   width: min(720px, calc(100% - 28px));
 }
 
+.ai-weekly-dialog {
+  width: min(920px, calc(100% - 28px));
+}
+
+.ai-weekly-dialog form {
+  max-height: min(88vh, 760px);
+}
+
+.ai-weekly-output {
+  width: 100%;
+  min-height: 360px;
+  max-height: 56vh;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  background: #f7faf8;
+  padding: 12px;
+  resize: vertical;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .analytics-list {
   display: grid;
   max-height: min(56vh, 520px);
@@ -1480,12 +1510,24 @@ textarea {
   }
 
   .trend-toolbar {
+    grid-template-columns: 1fr;
     align-items: stretch;
-    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
   }
 
   .trend-toolbar .segmented-control {
     width: 100%;
+  }
+
+  .trend-toolbar .date-navigator {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: 40px minmax(0, 1fr) 40px auto;
+  }
+
+  .timeline-control {
+    grid-column: 1;
   }
 }
 
@@ -1601,7 +1643,7 @@ textarea {
   }
 
   .trend-toolbar .date-navigator {
-    grid-template-columns: 40px minmax(130px, 1fr) 40px auto;
+    grid-template-columns: 40px minmax(0, 1fr) 40px auto;
   }
 
   .trend-toolbar {
@@ -1624,6 +1666,11 @@ textarea {
 
   .dynamics-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ai-weekly-button {
+    width: calc(100% - 28px);
+    margin: 10px 14px 12px;
   }
 
   .dynamics-metrics article:nth-child(2n) {
@@ -1683,6 +1730,22 @@ textarea {
   }
 
   .analytics-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-weekly-dialog form {
+    max-height: min(90vh, 760px);
+    padding: 16px;
+  }
+
+  .ai-weekly-output {
+    min-height: 320px;
+    max-height: 52vh;
+    font-size: 12px;
+  }
+
+  .ai-weekly-dialog .dialog-actions {
+    display: grid;
     grid-template-columns: 1fr;
   }
 

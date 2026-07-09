@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=8.5" />
+    <link rel="stylesheet" href="./styles.css?v=8.6.1" />
   </head>
   <body>
     <div class="app-shell">
@@ -267,6 +267,7 @@
                 <h3>状态稳定性</h3>
               </div>
             </div>
+            <button id="aiWeeklyButton" class="tool-button ai-weekly-button" type="button">AI 周复盘</button>
             <div class="dynamics-metrics">
               <article><span>平均状态</span><strong id="dynamicsAverage">-</strong></article>
               <article><span>稳定性</span><strong id="dynamicsStability">-</strong></article>
@@ -396,7 +397,23 @@
       </form>
     </dialog>
 
+    <dialog id="aiWeeklyDialog" class="dialog ai-weekly-dialog">
+      <form method="dialog" id="aiWeeklyForm">
+        <div class="dialog-heading">
+          <span class="eyebrow">本地生成</span>
+          <h2>AI 周复盘 Context</h2>
+        </div>
+        <p id="aiWeeklySummary" class="dialog-copy"></p>
+        <textarea id="aiWeeklyOutput" class="ai-weekly-output" rows="18" readonly></textarea>
+        <div class="dialog-actions">
+          <button class="quiet-button" id="copyAiWeeklyButton" type="button">复制 Markdown</button>
+          <button class="tool-button" id="downloadAiWeeklyButton" type="button">下载 Markdown</button>
+          <button class="primary-button" id="closeAiWeeklyButton" type="button">关闭</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=8.5" defer></script>
+    <script src="./app.js?v=8.6.1" defer></script>
   </body>
 </html>

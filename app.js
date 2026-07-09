@@ -8,7 +8,7 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "8.5";
+  const APP_VERSION = "8.6.1";
   const DYNAMICS_THRESHOLDS = {
     dailySwingStable: 18,
     dailySwingHigh: 35,
@@ -161,6 +161,7 @@
     dynamicsDataQuality: document.getElementById("dynamicsDataQuality"),
     dynamicsEventList: document.getElementById("dynamicsEventList"),
     dynamicsPatternList: document.getElementById("dynamicsPatternList"),
+    aiWeeklyButton: document.getElementById("aiWeeklyButton"),
     stateCanvas: document.getElementById("stateCanvas"),
     valenceCanvas: document.getElementById("valenceCanvas"),
     energyCanvas: document.getElementById("energyCanvas"),
@@ -186,6 +187,13 @@
     analyticsForm: document.getElementById("analyticsForm"),
     analyticsList: document.getElementById("analyticsList"),
     cancelAnalyticsButton: document.getElementById("cancelAnalyticsButton"),
+    aiWeeklyDialog: document.getElementById("aiWeeklyDialog"),
+    aiWeeklyForm: document.getElementById("aiWeeklyForm"),
+    aiWeeklySummary: document.getElementById("aiWeeklySummary"),
+    aiWeeklyOutput: document.getElementById("aiWeeklyOutput"),
+    copyAiWeeklyButton: document.getElementById("copyAiWeeklyButton"),
+    downloadAiWeeklyButton: document.getElementById("downloadAiWeeklyButton"),
+    closeAiWeeklyButton: document.getElementById("closeAiWeeklyButton"),
     toast: document.getElementById("toast"),
   };
 
@@ -3015,6 +3023,331 @@
     renderContextTrack(els.activityTrack, "activity", dates);
   }
 
+  function formatPromptNumber(value, digits = 1) {
+    return Number.isFinite(value) ? value.toFixed(digits) : "-";
+  }
+
+  function rawValueByRole(record, role) {
+    const column = getColumnByRole(role);
+    return column ? String(record.values?.[column.id] ?? "").trim() : "";
+  }
+
+  function meanRoleForDates(role, dates) {
+    return meanFinite(
+      aggregateRole(role, dates)
+        .filter(Boolean)
+        .map((item) => item.mean)
+    );
+  }
+
+  function truncatePromptText(value, maxLength = 160) {
+    const text = String(value || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength).trimEnd()}...`;
+  }
+
+  function timeBucketCoverage(timeline) {
+    const labels = {
+      morning: "早",
+      noon: "中",
+      afternoon: "晚",
+      evening: "夜",
+    };
+    const buckets = new Set(timeline.map((item) => timeBucket(item.record)).filter((item) => item !== "unknown"));
+    const present = Object.entries(labels)
+      .filter(([key]) => buckets.has(key))
+      .map(([, label]) => label);
+    return {
+      count: present.length,
+      text: present.length ? present.join("/") : "无有效时段",
+    };
+  }
+
+  function changeText(delta) {
+    if (!Number.isFinite(delta)) return "可比较数据不足";
+    if (Math.abs(delta) < 3) return `基本持平（${delta >= 0 ? "+" : ""}${delta.toFixed(1)}）`;
+    return `${delta > 0 ? "后段升高" : "后段降低"} ${Math.abs(delta).toFixed(1)} 分`;
+  }
+
+  function volatilityLabel(severity) {
+    if (severity === "stable") return "稳定";
+    if (severity === "medium") return "中等";
+    if (severity === "high") return "高波动";
+    return "数据不足";
+  }
+
+  function strongestRumination(records) {
+    const ranked = records
+      .map((record) => ({
+        text: ruminationText(record),
+        value: ruminationValue(record),
+      }))
+      .filter((item) => item.text || item.value !== null)
+      .sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
+    return ranked[0]?.text || "无记录";
+  }
+
+  function dailyCardLines(date, day) {
+    const records = rangeRecords([date]).map((item) => item.record);
+    const range = day?.range || dailyStateRange(date);
+    const activities = records
+      .map((record) => ({
+        time: recordTime(record) || "--:--",
+        text: activityText(record),
+      }))
+      .filter((item) => item.text)
+      .slice(0, 3)
+      .map((item) => `${item.time} ${truncatePromptText(item.text, 90)}`);
+    const rangeText = range
+      ? `${formatStateScore(range.min)} / ${formatStateScore(range.max)}`
+      : "- / -";
+    return [
+      `### ${date}`,
+      `- 平均状态：${formatStateScore(day?.score ?? range?.mean)}`,
+      `- 当天最高/最低：${rangeText}`,
+      `- 波动：${volatilityLabel(day?.severity)}`,
+      `- 反刍：${strongestRumination(records)}`,
+      `- 关键活动：${activities.length ? activities.join("；") : "无明显活动文本"}`,
+    ];
+  }
+
+  function evidenceKey(item) {
+    return item.record.id || `${item.date}-${item.time}-${item.minutes}`;
+  }
+
+  function addEvidenceCandidate(map, item, priority, reason) {
+    const key = evidenceKey(item);
+    const current = map.get(key);
+    if (current) {
+      current.priority = Math.max(current.priority, priority);
+      current.reasons.add(reason);
+      return;
+    }
+    map.set(key, {
+      item,
+      priority,
+      reasons: new Set([reason]),
+    });
+  }
+
+  function selectWeeklyEvidence(dates) {
+    const timeline = rangeStateTimeline(dates);
+    const candidates = new Map();
+    [...timeline]
+      .sort((a, b) => a.state.score - b.state.score)
+      .slice(0, 3)
+      .forEach((item, index) => addEvidenceCandidate(candidates, item, 100 - index, "低点"));
+    [...timeline]
+      .sort((a, b) => b.state.score - a.state.score)
+      .slice(0, 2)
+      .forEach((item, index) => addEvidenceCandidate(candidates, item, 88 - index, "高点"));
+
+    adjacentJumps(timeline)
+      .filter((item) => item.jump >= DYNAMICS_THRESHOLDS.jumpNotice)
+      .sort((a, b) => b.jump - a.jump)
+      .slice(0, 4)
+      .forEach((jump) => {
+        addEvidenceCandidate(candidates, jump.from, 75 + Math.min(jump.jump, 30), "跳变前");
+        addEvidenceCandidate(candidates, jump.to, 75 + Math.min(jump.jump, 30), "跳变后");
+      });
+
+    timeline.forEach((item) => {
+      const rumination = ruminationValue(item.record);
+      if (rumination !== null && rumination >= 2) {
+        addEvidenceCandidate(candidates, item, 70 + rumination * 4, "强反刍");
+      }
+      const activity = activityText(item.record);
+      if (activity.length >= 30) {
+        addEvidenceCandidate(candidates, item, 45 + Math.min(activity.length / 20, 12), "活动解释");
+      }
+    });
+
+    const selected = [];
+    const dayCounts = new Map();
+    [...candidates.values()]
+      .sort((a, b) => b.priority - a.priority || a.item.minutes - b.item.minutes)
+      .forEach((candidate) => {
+        const dayCount = dayCounts.get(candidate.item.date) || 0;
+        if (selected.length >= 12 || dayCount >= 3) return;
+        selected.push(candidate);
+        dayCounts.set(candidate.item.date, dayCount + 1);
+      });
+
+    return selected.sort((a, b) => a.item.minutes - b.item.minutes);
+  }
+
+  function evidenceLine(candidate, index) {
+    const item = candidate.item;
+    const record = item.record;
+    const evidenceId = `E${String(index + 1).padStart(2, "0")}`;
+    const activity = truncatePromptText(activityText(record), 160) || "无";
+    return `[${evidenceId}] ${item.date} ${item.time}｜状态 ${formatStateScore(item.state.score)}｜愉快 ${rawValueByRole(record, "valence") || "-"}｜能量 ${rawValueByRole(record, "energeticArousal") || "-"}｜紧张担忧 ${rawValueByRole(record, "tenseArousal") || "-"}｜反刍 ${ruminationText(record) || "无记录"}｜活动原文：${activity}`;
+  }
+
+  function formatJumpLine(jump) {
+    const fromDate = jump.from.date === jump.to.date ? jump.from.date : `${jump.from.date} ${jump.from.time}`;
+    const fromTime = jump.from.date === jump.to.date ? jump.from.time : "";
+    const start = [fromDate, fromTime].filter(Boolean).join(" ");
+    return `  - ${start} → ${jump.to.date} ${jump.to.time}，状态变化 ${jump.jump.toFixed(1)}`;
+  }
+
+  function formatRecoveryContext(recovery) {
+    if (!recovery) return ["  - 当前 7 天窗口未形成可判断低点或恢复路径。"];
+    const lines = [
+      `  - 低点：${recovery.low.date} ${recovery.low.time}，状态 ${formatStateScore(recovery.low.state.score)}`,
+      `  - 恢复目标：${formatStateScore(recovery.target)}`,
+    ];
+    if (recovery.recovered) {
+      const hours = recovery.hours;
+      const duration = hours < 24 ? `${hours.toFixed(1)} 小时` : `${(hours / 24).toFixed(1)} 天`;
+      lines.push(`  - 恢复用时：${duration}，到 ${recovery.recovered.date} ${recovery.recovered.time}`);
+    } else {
+      lines.push("  - 恢复用时：窗口内尚未回到目标。");
+    }
+    return lines;
+  }
+
+  function buildAiWeeklyContext(endDate = state.selectedDate) {
+    const dates = dateValues(endDate, 7);
+    const summary = stateWindowSummary(endDate, 7);
+    const dynamics = computeDynamics(dates);
+    const timeline = rangeStateTimeline(dates);
+    const coverage = timeBucketCoverage(timeline);
+    const highestDay = summary.valid.length
+      ? summary.valid.reduce((best, item) => item.score > best.score ? item : best)
+      : null;
+    const lowestDay = summary.valid.length
+      ? summary.valid.reduce((best, item) => item.score < best.score ? item : best)
+      : null;
+    const visibleJumps = adjacentJumps(timeline)
+      .filter((item) => item.jump >= DYNAMICS_THRESHOLDS.jumpNotice)
+      .sort((a, b) => a.from.minutes - b.from.minutes)
+      .slice(0, 6);
+    const evidence = selectWeeklyEvidence(dates);
+    const patternLines = dynamics.patterns.length
+      ? dynamics.patterns.map((item) => `  - ${item.label}：${item.count} 次`)
+      : ["  - 暂无足够三轴数据。"];
+    const qualityNotes = [];
+    if (timeline.length < 4) qualityNotes.push("有效时间点很少，以下分析应视为低置信度线索。");
+    if (longestMissingRun(summary.daily) > 1) qualityNotes.push("存在连续缺失日期，请避免把未记录时段当作状态稳定。");
+    if (coverage.count < 3) qualityNotes.push("记录时段覆盖不均匀，请谨慎比较不同日期。");
+    const markdown = [
+      "# 我的 7 天情绪周复盘 Context",
+      "",
+      "请基于下面数据做个人复盘。不要做医学诊断。请区分：",
+      "1. 数据事实",
+      "2. 可能解释",
+      "3. 下周建议",
+      "",
+      "所有重要判断请引用日期或证据编号。请优先解释这一周状态为什么变化，并明确哪些结论不确定。",
+      "",
+      "## 1. 时间范围与数据质量",
+      `- 范围：${dates[0]} 至 ${dates[dates.length - 1]}`,
+      `- 有效状态日：${summary.valid.length}/7`,
+      `- 有效时间点：${timeline.length}`,
+      `- 最长连续缺失：${longestMissingRun(summary.daily)} 天`,
+      `- 时段覆盖：${coverage.count}/4（${coverage.text}）`,
+      `- 注意：${qualityNotes.length ? qualityNotes.join(" ") : "记录频率可能不均匀，请避免把未记录时段当作状态稳定。"}`,
+      "",
+      "## 2. 一周数值摘要",
+      `- 平均状态指数：${formatStateScore(summary.score)}`,
+      `- 愉快平均：${formatPromptNumber(meanRoleForDates("valence", dates))}`,
+      `- 能量平均：${formatPromptNumber(meanRoleForDates("energeticArousal", dates))}`,
+      `- 紧张担忧平均：${formatPromptNumber(meanRoleForDates("tenseArousal", dates))}`,
+      `- 腰痛平均：${formatPromptNumber(meanRoleForDates("physical", dates))}`,
+      `- 最高状态日：${highestDay ? `${highestDay.date}，${formatStateScore(highestDay.score)}` : "-"}`,
+      `- 最低状态日：${lowestDay ? `${lowestDay.date}，${formatStateScore(lowestDay.score)}` : "-"}`,
+      `- 最近段相对前段：${changeText(summary.delta)}`,
+      "",
+      "## 3. 情绪动力学摘要",
+      `- 稳定性分数：${formatPromptNumber(dynamics.stability, 0)}`,
+      `- 最大日内波动：${dynamics.maxSwing ? `${dynamics.maxSwing.swing.toFixed(1)}，发生在 ${dynamics.maxSwing.date}` : "-"}`,
+      `- 平均跳变：${formatPromptNumber(dynamics.meanJump)}`,
+      "- 明显跳变：",
+      ...(visibleJumps.length ? visibleJumps.map(formatJumpLine) : ["  - 暂无明显跳变。"]),
+      "- 恢复路径：",
+      ...formatRecoveryContext(dynamics.recovery),
+      "- 常见状态组合：",
+      ...patternLines,
+      "",
+      "## 4. 每日卡片",
+      ...dates.flatMap((date) => ["", ...dailyCardLines(date, dynamics.daily.find((item) => item.date === date))]),
+      "",
+      "## 5. 关键原文证据",
+      ...(evidence.length ? evidence.map(evidenceLine) : ["暂无足够关键原文证据。"]),
+      "",
+      "## 6. 请你输出",
+      "- 本周总体状态",
+      "- 主要波动模式",
+      "- 可能触发因素",
+      "- 可能恢复因素",
+      "- 反刍和状态变化的关系",
+      "- 下周 3–5 条具体建议",
+      "- 哪些结论不确定",
+    ].join("\n");
+    return {
+      markdown,
+      meta: {
+        start: dates[0],
+        end: dates[dates.length - 1],
+        validDays: summary.valid.length,
+        timePoints: timeline.length,
+        evidenceCount: evidence.length,
+      },
+    };
+  }
+
+  function openAiWeeklyDialog() {
+    const context = buildAiWeeklyContext(state.selectedDate);
+    els.aiWeeklyOutput.value = context.markdown;
+    els.aiWeeklyOutput.dataset.start = context.meta.start;
+    els.aiWeeklyOutput.dataset.end = context.meta.end;
+    els.aiWeeklySummary.textContent =
+      `范围 ${context.meta.start} 至 ${context.meta.end} · ${context.meta.validDays}/7 个有效状态日 · ${context.meta.timePoints} 个有效时间点 · ${context.meta.evidenceCount} 条证据。不会上传或写回数据。`;
+    els.aiWeeklyDialog.showModal();
+    requestAnimationFrame(() => {
+      els.aiWeeklyOutput.scrollTop = 0;
+    });
+  }
+
+  async function copyAiWeeklyMarkdown() {
+    const text = els.aiWeeklyOutput.value;
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        els.aiWeeklyOutput.focus();
+        els.aiWeeklyOutput.select();
+        document.execCommand("copy");
+      }
+      showToast("周复盘 Markdown 已复制");
+    } catch (error) {
+      els.aiWeeklyOutput.focus();
+      els.aiWeeklyOutput.select();
+      showToast("已选中文本，可手动复制");
+    }
+  }
+
+  function downloadAiWeeklyMarkdown() {
+    const text = els.aiWeeklyOutput.value;
+    if (!text) return;
+    const start = els.aiWeeklyOutput.dataset.start || todayDate();
+    const end = els.aiWeeklyOutput.dataset.end || todayDate();
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const anchor = document.createElement("a");
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = sanitizeFileName(`AI周复盘_${start}_至_${end}`) + ".md";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
+    showToast("周复盘 Markdown 已下载");
+  }
+
   function showToast(message) {
     els.toast.textContent = message;
     els.toast.classList.remove("hidden");
@@ -3087,6 +3420,7 @@
     els.csvFileInput.addEventListener("change", (event) => onCsvFileSelected(event.target.files[0]));
     els.analyticsButton.addEventListener("click", openAnalyticsDialog);
     els.trendSettingsButton.addEventListener("click", openAnalyticsDialog);
+    els.aiWeeklyButton.addEventListener("click", openAiWeeklyDialog);
     els.backupButton.addEventListener("click", exportFullBackup);
     els.backupFileInput.addEventListener("change", (event) => restoreFullBackup(event.target.files[0]));
     els.openTrendsButton.addEventListener("click", () => switchView("trends"));
@@ -3192,6 +3526,9 @@
       }
     });
     els.cancelAnalyticsButton.addEventListener("click", () => els.analyticsDialog.close());
+    els.copyAiWeeklyButton.addEventListener("click", copyAiWeeklyMarkdown);
+    els.downloadAiWeeklyButton.addEventListener("click", downloadAiWeeklyMarkdown);
+    els.closeAiWeeklyButton.addEventListener("click", () => els.aiWeeklyDialog.close());
 
     window.addEventListener("beforeinstallprompt", (event) => {
       event.preventDefault();

@@ -8,7 +8,7 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "8.7.0";
+  const APP_VERSION = "8.7.1";
   const SCORE_MODEL_V2 = "whole-person-v2";
   const SCORE_MODEL_V1 = "legacy-v1";
   const SCORE_MODELS = {
@@ -1829,6 +1829,7 @@
 
   function dailyState(date) {
     const buckets = new Map();
+    const untimedValues = [];
     let invalidTimeCount = 0;
     state.records
       .filter((record) => inferRecordDate(record) === date)
@@ -1838,6 +1839,7 @@
         const bucket = timeBucket(record);
         if (bucket === "unknown") {
           invalidTimeCount += 1;
+          untimedValues.push(value);
           return;
         }
         if (!buckets.has(bucket)) buckets.set(bucket, []);
@@ -1847,7 +1849,10 @@
     const bucketCoverage = [];
     const bucketUncertainty = [];
     const bucketImputedWeight = [];
-    buckets.forEach((values) => {
+    const groups = buckets.size > 0
+      ? [...buckets.values()]
+      : (untimedValues.length ? [untimedValues] : []);
+    groups.forEach((values) => {
       bucketScores.push(meanFinite(values.map((value) => value.score)));
       bucketCoverage.push(meanFinite(values.map((value) => value.coverage)));
       bucketUncertainty.push(meanFinite(values.map((value) => value.uncertainty)));
@@ -1863,6 +1868,7 @@
       imputedWeight: meanFinite(bucketImputedWeight) || 0,
       periods: buckets.size,
       invalidTimeCount,
+      usedUntimedFallback: buckets.size === 0 && untimedValues.length > 0,
     };
   }
 
@@ -2062,7 +2068,22 @@
   }
 
   function dailyStateRange(date) {
-    const points = rangeStateTimeline([date]);
+    let untimedIndex = 0;
+    const points = rangeRecords([date])
+      .map((item) => {
+        const rawTime = recordTime(item.record).trim();
+        const untimed = timeBucket(item.record) === "unknown";
+        if (untimed) untimedIndex += 1;
+        return {
+          record: item.record,
+          date: inferRecordDate(item.record),
+          time: untimed ? `记录 ${untimedIndex}` : rawTime,
+          minutes: dateTimeMinutes(item.record),
+          state: stateValue(item.record),
+          untimed,
+        };
+      })
+      .filter((item) => item.state);
     if (!points.length) return null;
     const scores = points.map((item) => item.state.score);
     return {
@@ -2071,6 +2092,7 @@
       min: Math.min(...scores),
       max: Math.max(...scores),
       count: scores.length,
+      untimedCount: points.filter((item) => item.untimed).length,
       points,
     };
   }
@@ -2226,11 +2248,11 @@
     const dailyRmssd = rootMeanSquare(dailyChanges);
     const buckets = new Set(timeline.map((item) => timeBucket(item.record)));
     const recordDays = new Set(rangeRecords(dates).map((item) => inferRecordDate(item.record))).size;
-    const validDays = new Set(timeline.map((item) => item.date)).size;
     const invalidTimeCount = rangeRecords(dates).filter((item) => {
       return stateValue(item.record) && timeBucket(item.record) === "unknown";
     }).length;
-    const imputedWeight = meanFinite(timeline.map((item) => item.state.imputedWeight)) || 0;
+    const fallbackDays = validDaily.filter((item) => item.usedUntimedFallback).length;
+    const imputedWeight = meanFinite(validDaily.map((item) => item.imputedWeight)) || 0;
     const confidence = dynamicsConfidence(validDaily.length, dates.length, dailyChanges.length, buckets.size);
     const quality = [];
     quality.push(`${validDaily.length}/${dates.length} 个有效状态日 · ${dailyChanges.length} 组连续日配对`);
@@ -2239,8 +2261,13 @@
     if (activeScoreModelId() === SCORE_MODEL_V2) {
       quality.push(`平均指标覆盖 ${Math.round((1 - imputedWeight) * 100)}% · 中性补位 ${Math.round(imputedWeight * 100)}%`);
     }
-    if (invalidTimeCount > 0) quality.push(`${invalidTimeCount} 条核心分数记录因时间无效未参与日均与动力学`);
-    if (recordDays > validDays) quality.push(`${recordDays - validDays} 天有记录但缺少核心分数`);
+    if (fallbackDays > 0) {
+      quality.push(`${fallbackDays} 天没有具体时间，状态日均按当天有效记录均值恢复；不计算相邻跳变和恢复时间`);
+    }
+    if (invalidTimeCount > 0 && fallbackDays === 0) {
+      quality.push(`${invalidTimeCount} 条无具体时间记录未混入已有标准时段的日均`);
+    }
+    if (recordDays > validDaily.length) quality.push(`${recordDays - validDaily.length} 天有记录但缺少核心分数`);
     quality.push(`结论置信度：${confidence}`);
     return {
       average,
@@ -2283,7 +2310,9 @@
       }</strong>`;
       const title = day.severity === "missing"
         ? `${day.date} 数据不足`
-        : `${day.date} · 日内波动 ${day.swing.toFixed(1)} · ${day.count} 个时间点`;
+        : `${day.date} · 日内波动 ${day.swing.toFixed(1)} · ${day.count} 条有效记录${
+            day.range?.untimedCount ? ` · ${day.range.untimedCount} 条无具体时间` : ""
+          }`;
       item.title = title;
       item.setAttribute("aria-label", title);
       item.addEventListener("click", () => showToast(title));
@@ -2366,10 +2395,10 @@
 
   function momentaryStateTimeline() {
     return dailyTimeline()
-      .filter((item) => timeBucket(item.record) !== "unknown")
       .map((item) => ({
         ...item,
         state: stateValue(item.record),
+        untimed: timeBucket(item.record) === "unknown",
       }));
   }
 
@@ -2900,6 +2929,7 @@
       const timeline = momentaryStateTimeline();
       const values = timeline.map((item) => item.state?.score ?? null);
       const valid = timeline.filter((item) => item.state);
+      const untimedCount = valid.filter((item) => item.untimed).length;
       const midpoint = Math.ceil(valid.length / 2);
       const early = meanFinite(valid.slice(0, midpoint).map((item) => item.state.score));
       const late = meanFinite(valid.slice(midpoint).map((item) => item.state.score));
@@ -2908,7 +2938,9 @@
         early === null || late === null ? null : late - early
       );
       els.trendStateSummary.textContent =
-        `${valid.length}/${timeline.length} 个有效时间点 · ${activeScoreModel().label} · 需要愉快和紧张担忧`;
+        `${valid.length}/${timeline.length} 条有效记录 · ${activeScoreModel().label} · 需要愉快和紧张担忧${
+          untimedCount ? ` · ${untimedCount} 条无具体时间，按原始顺序显示` : ""
+        }`;
       makeLineChart(
         "state",
         els.stateCanvas,
@@ -2969,13 +3001,19 @@
   }
 
   function dailyTimeline() {
+    let untimedIndex = 0;
     return state.records
       .filter((record) => inferRecordDate(record) === state.selectedDate)
-      .map((record, index) => ({
-        record,
-        index,
-        label: recordTime(record) || "--:--",
-      }))
+      .map((record, index) => {
+        const rawTime = recordTime(record).trim();
+        const untimed = timeBucket(record) === "unknown";
+        if (untimed) untimedIndex += 1;
+        return {
+          record,
+          index,
+          label: untimed ? `记录 ${untimedIndex}` : rawTime,
+        };
+      })
       .sort((a, b) => timeSortValue(a.label) - timeSortValue(b.label) || a.index - b.index);
   }
 
@@ -3366,7 +3404,9 @@
     if (timeline.length < 4) qualityNotes.push("有效时间点很少，以下分析应视为低置信度线索。");
     if (longestMissingRun(summary.daily) > 1) qualityNotes.push("存在连续缺失日期，请避免把未记录时段当作状态稳定。");
     if (coverage.count < 3) qualityNotes.push("记录时段覆盖不均匀，请谨慎比较不同日期。");
-    if (dynamics.invalidTimeCount > 0) qualityNotes.push(`${dynamics.invalidTimeCount} 条记录因时间无效未进入日均和动力学计算。`);
+    if (dynamics.invalidTimeCount > 0) {
+      qualityNotes.push(`${dynamics.invalidTimeCount} 条记录无具体时间；仅在当天没有标准时间时用于日均，不用于相邻跳变和恢复路径。`);
+    }
     const model = activeScoreModel();
     const modelDescription = activeScoreModelId() === SCORE_MODEL_V2
       ? "愉快40% / 平静25% / 能量15% / 低反刍12% / 身体舒适8%；非核心缺失项按50分中性补位"

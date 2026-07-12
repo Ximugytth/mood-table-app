@@ -8,7 +8,21 @@
     analytics: (templateId) => `moodTable.analytics.${templateId}`,
   };
 
-  const APP_VERSION = "8.6.1";
+  const APP_VERSION = "8.7.0";
+  const SCORE_MODEL_V2 = "whole-person-v2";
+  const SCORE_MODEL_V1 = "legacy-v1";
+  const SCORE_MODELS = {
+    [SCORE_MODEL_V2]: {
+      label: "个人状态模型 v2",
+      weights: { valence: 0.40, calm: 0.25, energy: 0.15, rumination: 0.12, comfort: 0.08 },
+      missing: "neutral",
+    },
+    [SCORE_MODEL_V1]: {
+      label: "旧版模型 v1",
+      weights: { valence: 0.45, calm: 0.30, energy: 0.10, rumination: 0.10, comfort: 0.05 },
+      missing: "renormalize",
+    },
+  };
   const DYNAMICS_THRESHOLDS = {
     dailySwingStable: 18,
     dailySwingHigh: 35,
@@ -57,7 +71,12 @@
     importRows: [],
     importFileName: "",
     deferredInstallPrompt: null,
-    analytics: { version: 1, columns: {}, scaleMode: "personal" },
+    analytics: {
+      version: 3,
+      columns: {},
+      scaleMode: "personal",
+      activeScoreModel: SCORE_MODEL_V2,
+    },
     trendMode: "day",
     overviewScale: 7,
     charts: {},
@@ -96,18 +115,13 @@
     overviewList: document.getElementById("overviewList"),
     overviewEmptyState: document.getElementById("overviewEmptyState"),
     openTrendsButton: document.getElementById("openTrendsButton"),
-    miniValenceValue: document.getElementById("miniValenceValue"),
-    miniEnergyValue: document.getElementById("miniEnergyValue"),
-    miniTensionValue: document.getElementById("miniTensionValue"),
-    miniValenceCanvas: document.getElementById("miniValenceCanvas"),
-    miniEnergyCanvas: document.getElementById("miniEnergyCanvas"),
-    miniTensionCanvas: document.getElementById("miniTensionCanvas"),
     stateScale7Button: document.getElementById("stateScale7Button"),
     stateScale14Button: document.getElementById("stateScale14Button"),
     stateScale56Button: document.getElementById("stateScale56Button"),
     overviewStateScore: document.getElementById("overviewStateScore"),
     overviewStateDelta: document.getElementById("overviewStateDelta"),
     overviewStateCoverage: document.getElementById("overviewStateCoverage"),
+    overviewStateModel: document.getElementById("overviewStateModel"),
     overviewStateCanvas: document.getElementById("overviewStateCanvas"),
     recordCount: document.getElementById("recordCount"),
     moodAverageLabel: document.getElementById("moodAverageLabel"),
@@ -152,15 +166,20 @@
     trendStateDelta: document.getElementById("trendStateDelta"),
     trendStateSummary: document.getElementById("trendStateSummary"),
     dynamicsAverage: document.getElementById("dynamicsAverage"),
-    dynamicsStability: document.getElementById("dynamicsStability"),
+    dynamicsDailyRmssd: document.getElementById("dynamicsDailyRmssd"),
     dynamicsMaxSwing: document.getElementById("dynamicsMaxSwing"),
     dynamicsMeanJump: document.getElementById("dynamicsMeanJump"),
+    dynamicsPairCount: document.getElementById("dynamicsPairCount"),
     dynamicsRecovery: document.getElementById("dynamicsRecovery"),
     dynamicsRecoveryPath: document.getElementById("dynamicsRecoveryPath"),
     dynamicsStabilityStrip: document.getElementById("dynamicsStabilityStrip"),
     dynamicsDataQuality: document.getElementById("dynamicsDataQuality"),
     dynamicsEventList: document.getElementById("dynamicsEventList"),
     dynamicsPatternList: document.getElementById("dynamicsPatternList"),
+    stateProfilePoint: document.getElementById("stateProfilePoint"),
+    stateProfileInterpretation: document.getElementById("stateProfileInterpretation"),
+    stateProfileConfidence: document.getElementById("stateProfileConfidence"),
+    detailedAnalysis: document.getElementById("detailedAnalysis"),
     aiWeeklyButton: document.getElementById("aiWeeklyButton"),
     stateCanvas: document.getElementById("stateCanvas"),
     valenceCanvas: document.getElementById("valenceCanvas"),
@@ -186,6 +205,7 @@
     analyticsDialog: document.getElementById("analyticsDialog"),
     analyticsForm: document.getElementById("analyticsForm"),
     analyticsList: document.getElementById("analyticsList"),
+    scoreModelSelect: document.getElementById("scoreModelSelect"),
     cancelAnalyticsButton: document.getElementById("cancelAnalyticsButton"),
     aiWeeklyDialog: document.getElementById("aiWeeklyDialog"),
     aiWeeklyForm: document.getElementById("aiWeeklyForm"),
@@ -437,10 +457,14 @@
 
   function reconcileAnalytics(config = state.analytics) {
     const template = getActiveTemplate();
+    const activeScoreModel = Object.hasOwn(SCORE_MODELS, config?.activeScoreModel)
+      ? config.activeScoreModel
+      : SCORE_MODEL_V2;
     const next = {
-      version: 2,
+      version: 3,
       columns: {},
       scaleMode: config?.scaleMode === "fixed" ? "fixed" : "personal",
+      activeScoreModel,
     };
     (template?.columns || []).forEach((column) => {
       next.columns[column.id] = config?.columns?.[column.id] || inferAnalyticsForColumn(column);
@@ -469,6 +493,16 @@
 
   function getAnalyticsSetting(columnId) {
     return state.analytics.columns[columnId] || { dataType: "text", role: "none" };
+  }
+
+  function activeScoreModelId() {
+    return Object.hasOwn(SCORE_MODELS, state.analytics.activeScoreModel)
+      ? state.analytics.activeScoreModel
+      : SCORE_MODEL_V2;
+  }
+
+  function activeScoreModel() {
+    return SCORE_MODELS[activeScoreModelId()];
   }
 
   function loadApp() {
@@ -572,7 +606,6 @@
     if (state.activeView === "overview") {
       requestAnimationFrame(() => {
         renderStateOverview();
-        renderTrendPreview();
       });
     } else if (state.activeView === "trends") {
       requestAnimationFrame(renderTrends);
@@ -945,6 +978,9 @@
     state.activeView = view;
     if (view === "record") {
       state.viewMode = "day";
+    }
+    if (view === "trends") {
+      els.detailedAnalysis.open = false;
     }
     document.body.classList.toggle("record-mode", view === "record");
     document.body.classList.toggle("trends-mode", view === "trends");
@@ -1451,6 +1487,7 @@
   function openAnalyticsDialog() {
     const template = getActiveTemplate();
     els.analyticsList.innerHTML = "";
+    els.scoreModelSelect.value = state.analytics.activeScoreModel || SCORE_MODEL_V2;
     getMetricColumns(template).forEach((column) => {
       const setting = getAnalyticsSetting(column.id);
       const row = document.createElement("div");
@@ -1500,9 +1537,12 @@
 
   function saveAnalyticsFromDialog() {
     const next = {
-      version: 2,
+      version: 3,
       columns: { ...state.analytics.columns },
       scaleMode: state.analytics.scaleMode,
+      activeScoreModel: Object.hasOwn(SCORE_MODELS, els.scoreModelSelect.value)
+        ? els.scoreModelSelect.value
+        : SCORE_MODEL_V2,
     };
     const used = new Set();
     for (const row of els.analyticsList.querySelectorAll(".analytics-row")) {
@@ -1722,35 +1762,47 @@
     const energy = numericValue(record, "energeticArousal");
     const rumination = ruminationValue(record);
     const pain = numericValue(record, "physical");
+    const model = activeScoreModel();
     const parts = [
-      { key: "valence", weight: 0.45, value: clamp(((valence + 5) / 10) * 100, 0, 100) },
-      { key: "calm", weight: 0.30, value: clamp(((10 - tension) / 10) * 100, 0, 100) },
+      { key: "valence", weight: model.weights.valence, value: clamp(((valence + 5) / 10) * 100, 0, 100) },
+      { key: "calm", weight: model.weights.calm, value: clamp(((10 - tension) / 10) * 100, 0, 100) },
       {
         key: "energy",
-        weight: 0.10,
+        weight: model.weights.energy,
         value: energy === null ? null : clamp(((energy + 5) / 10) * 100, 0, 100),
       },
       {
         key: "rumination",
-        weight: 0.10,
+        weight: model.weights.rumination,
         value: rumination === null ? null : clamp(((3 - rumination) / 3) * 100, 0, 100),
       },
       {
         key: "comfort",
-        weight: 0.05,
+        weight: model.weights.comfort,
         value: pain === null ? null : clamp(((10 - pain) / 10) * 100, 0, 100),
       },
     ];
     const available = parts.filter((part) => part.value !== null);
     const usedWeight = available.reduce((sum, part) => sum + part.weight, 0);
     if (usedWeight <= 0) return null;
-    const score = available.reduce(
-      (sum, part) => sum + part.value * part.weight,
-      0
-    ) / usedWeight;
+    const missing = parts.filter((part) => part.value === null);
+    const missingWeight = missing.reduce((sum, part) => sum + part.weight, 0);
+    const score = model.missing === "neutral"
+      ? parts.reduce(
+          (sum, part) => sum + (part.value === null ? 50 : part.value) * part.weight,
+          0
+        )
+      : available.reduce(
+          (sum, part) => sum + part.value * part.weight,
+          0
+        ) / usedWeight;
     return {
       score,
       coverage: usedWeight,
+      uncertainty: model.missing === "neutral" ? missingWeight * 50 : 0,
+      imputedWeight: model.missing === "neutral" ? missingWeight : 0,
+      imputedKeys: model.missing === "neutral" ? missing.map((part) => part.key) : [],
+      modelId: activeScoreModelId(),
       parts,
     };
   }
@@ -1758,7 +1810,10 @@
   function timeBucket(record) {
     const match = recordTime(record).match(/^(\d{1,2}):(\d{2})/);
     if (!match) return "unknown";
-    const minutes = Number(match[1]) * 60 + Number(match[2]);
+    const hours = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hours > 23 || minute > 59) return "unknown";
+    const minutes = hours * 60 + minute;
     if (minutes >= 5 * 60 && minutes < 12 * 60) return "morning";
     if (minutes >= 12 * 60 && minutes < 14 * 60) return "noon";
     if (minutes >= 14 * 60 && minutes < 18 * 60) return "afternoon";
@@ -1774,20 +1829,29 @@
 
   function dailyState(date) {
     const buckets = new Map();
+    let invalidTimeCount = 0;
     state.records
       .filter((record) => inferRecordDate(record) === date)
       .forEach((record) => {
         const value = stateValue(record);
         if (!value) return;
         const bucket = timeBucket(record);
+        if (bucket === "unknown") {
+          invalidTimeCount += 1;
+          return;
+        }
         if (!buckets.has(bucket)) buckets.set(bucket, []);
         buckets.get(bucket).push(value);
       });
     const bucketScores = [];
     const bucketCoverage = [];
+    const bucketUncertainty = [];
+    const bucketImputedWeight = [];
     buckets.forEach((values) => {
       bucketScores.push(meanFinite(values.map((value) => value.score)));
       bucketCoverage.push(meanFinite(values.map((value) => value.coverage)));
+      bucketUncertainty.push(meanFinite(values.map((value) => value.uncertainty)));
+      bucketImputedWeight.push(meanFinite(values.map((value) => value.imputedWeight)));
     });
     const score = meanFinite(bucketScores);
     if (score === null) return null;
@@ -1795,7 +1859,10 @@
       date,
       score,
       coverage: meanFinite(bucketCoverage) || 0,
+      uncertainty: meanFinite(bucketUncertainty) || 0,
+      imputedWeight: meanFinite(bucketImputedWeight) || 0,
       periods: buckets.size,
+      invalidTimeCount,
     };
   }
 
@@ -1829,6 +1896,8 @@
       score,
       delta: early === null || late === null ? null : late - early,
       coverage: meanFinite(valid.map((item) => item.coverage)),
+      uncertainty: meanFinite(valid.map((item) => item.uncertainty)),
+      imputedWeight: meanFinite(valid.map((item) => item.imputedWeight)),
     };
   }
 
@@ -1868,7 +1937,7 @@
         minutes: dateTimeMinutes(item.record),
         state: stateValue(item.record),
       }))
-      .filter((item) => item.state);
+      .filter((item) => item.state && timeBucket(item.record) !== "unknown");
   }
 
   function rolePercent(record, role) {
@@ -1942,7 +2011,7 @@
       const previous = timeline[index - 1];
       const current = timeline[index];
       const gapHours = (current.minutes - previous.minutes) / 60;
-      if (gapHours < 0 || gapHours > 36) continue;
+      if (current.date !== previous.date || gapHours < 0 || gapHours > 12) continue;
       const jump = Math.abs(current.state.score - previous.state.score);
       jumps.push({
         from: previous,
@@ -1969,7 +2038,7 @@
       .find((item) => item.state.score >= target);
     if (!recovered) {
       return {
-        text: `${low.date.slice(5)} ${low.time} 低点 ${formatStateScore(low.state.score)}，窗口内未回到 ${formatStateScore(target)}`,
+        text: `${low.date.slice(5)} ${low.time} 低点 ${formatStateScore(low.state.score)}，窗口内未首次观测到回到 ${formatStateScore(target)}`,
         hours: null,
         low,
         recovered: null,
@@ -1982,8 +2051,9 @@
       ? `${hours.toFixed(1)} 小时`
       : `${(hours / 24).toFixed(1)} 天`;
     return {
-      text: `${low.date.slice(5)} ${low.time} 后约 ${timeText} 回到 ${formatStateScore(target)}`,
+      text: `${low.date.slice(5)} ${low.time} 后 ${timeText} 首次观测到回到 ${formatStateScore(target)}${hours > 12 ? " · 采样间隔较大" : ""}`,
       hours,
+      lowConfidence: hours > 12,
       low,
       recovered,
       target,
@@ -2103,6 +2173,42 @@
       .slice(0, 6);
   }
 
+  function rootMeanSquare(values) {
+    const finite = values.filter(Number.isFinite);
+    if (!finite.length) return null;
+    return Math.sqrt(meanFinite(finite.map((value) => value ** 2)));
+  }
+
+  function consecutiveDailyChanges(daily) {
+    const changes = [];
+    for (let index = 1; index < daily.length; index += 1) {
+      const previous = daily[index - 1];
+      const current = daily[index];
+      if (!previous || !current) continue;
+      changes.push(current.score - previous.score);
+    }
+    return changes;
+  }
+
+  function dynamicsConfidence(validDays, totalDays, pairCount, timeBucketCount) {
+    const validRatio = totalDays > 0 ? validDays / totalDays : 0;
+    if (validRatio >= 0.7 && pairCount >= 4 && timeBucketCount >= 3) return "足够";
+    if (validRatio >= 0.5 && pairCount >= 2 && timeBucketCount >= 2) return "有限";
+    return "不足";
+  }
+
+  function profileInterpretation(average, dailyRmssd, confidence) {
+    if (!Number.isFinite(average) || !Number.isFinite(dailyRmssd) || confidence === "不足") {
+      return "数据不足，暂不划分状态组合。";
+    }
+    const level = average >= 50 ? "high" : "low";
+    const volatile = dailyRmssd >= DYNAMICS_THRESHOLDS.jumpNotice;
+    if (level === "high" && !volatile) return "状态较好且平稳。";
+    if (level === "high" && volatile) return "总体状态尚好，但存在明显起伏。";
+    if (level === "low" && !volatile) return "状态持续偏低，建议关注低状态的延续。";
+    return "低点与跳变并存，建议结合活动和反刍记录查看。";
+  }
+
   function computeDynamics(dates) {
     const daily = dates.map((date) => dailyState(date));
     const validDaily = daily.filter(Boolean);
@@ -2115,29 +2221,35 @@
       ? swings.reduce((max, item) => item.swing > max.swing ? item : max)
       : null;
     const jumps = adjacentJumps(timeline);
-    const meanJump = meanFinite(jumps.map((item) => item.jump));
-    const stabilityPenalty = (
-      Math.min(deviation / 25, 1) * 35 +
-      Math.min((meanJump || 0) / 25, 1) * 40 +
-      Math.min((maxSwing?.swing || 0) / 50, 1) * 25
-    );
-    const stability = scores.length >= 2
-      ? clamp(100 - stabilityPenalty, 0, 100)
-      : null;
+    const meanJump = rootMeanSquare(jumps.map((item) => item.jump));
+    const dailyChanges = consecutiveDailyChanges(daily);
+    const dailyRmssd = rootMeanSquare(dailyChanges);
     const buckets = new Set(timeline.map((item) => timeBucket(item.record)));
     const recordDays = new Set(rangeRecords(dates).map((item) => inferRecordDate(item.record))).size;
     const validDays = new Set(timeline.map((item) => item.date)).size;
+    const invalidTimeCount = rangeRecords(dates).filter((item) => {
+      return stateValue(item.record) && timeBucket(item.record) === "unknown";
+    }).length;
+    const imputedWeight = meanFinite(timeline.map((item) => item.state.imputedWeight)) || 0;
+    const confidence = dynamicsConfidence(validDaily.length, dates.length, dailyChanges.length, buckets.size);
     const quality = [];
-    quality.push(`${validDays}/${dates.length} 个有效状态日，${timeline.length} 个有效时间点`);
+    quality.push(`${validDaily.length}/${dates.length} 个有效状态日 · ${dailyChanges.length} 组连续日配对`);
     quality.push(`最长连续缺失 ${longestMissingRun(daily)} 天`);
     quality.push(`覆盖 ${buckets.size}/4 个常用时段`);
-    if (recordDays > validDays) quality.push(`${recordDays - validDays} 天有记录但缺少核心分数`);
-    if (timeline.length < Math.max(4, Math.ceil(dates.length / 2))) {
-      quality.push("样本偏少，动力学结论只作提示");
+    if (activeScoreModelId() === SCORE_MODEL_V2) {
+      quality.push(`平均指标覆盖 ${Math.round((1 - imputedWeight) * 100)}% · 中性补位 ${Math.round(imputedWeight * 100)}%`);
     }
+    if (invalidTimeCount > 0) quality.push(`${invalidTimeCount} 条核心分数记录因时间无效未参与日均与动力学`);
+    if (recordDays > validDays) quality.push(`${recordDays - validDays} 天有记录但缺少核心分数`);
+    quality.push(`结论置信度：${confidence}`);
     return {
       average,
-      stability,
+      dailyRmssd,
+      dailyPairCount: dailyChanges.length,
+      confidence,
+      interpretation: profileInterpretation(average, dailyRmssd, confidence),
+      imputedWeight,
+      invalidTimeCount,
       maxSwing,
       meanJump,
       recovery: recoverySummary(timeline, average, deviation),
@@ -2211,8 +2323,8 @@
   function renderDynamics(dates) {
     const dynamics = computeDynamics(dates);
     els.dynamicsAverage.textContent = formatStateScore(dynamics.average);
-    els.dynamicsStability.textContent = Number.isFinite(dynamics.stability)
-      ? dynamics.stability.toFixed(0)
+    els.dynamicsDailyRmssd.textContent = Number.isFinite(dynamics.dailyRmssd)
+      ? dynamics.dailyRmssd.toFixed(1)
       : "-";
     els.dynamicsMaxSwing.textContent = dynamics.maxSwing
       ? `${dynamics.maxSwing.swing.toFixed(1)} · ${dynamics.maxSwing.date.slice(5)}`
@@ -2220,7 +2332,17 @@
     els.dynamicsMeanJump.textContent = Number.isFinite(dynamics.meanJump)
       ? dynamics.meanJump.toFixed(1)
       : "-";
+    els.dynamicsPairCount.textContent = String(dynamics.dailyPairCount);
     els.dynamicsRecovery.textContent = dynamics.recovery?.text || "当前窗口未形成可判断低点";
+    const canPlot = Number.isFinite(dynamics.average) && Number.isFinite(dynamics.dailyRmssd);
+    els.stateProfilePoint.classList.toggle("hidden", !canPlot);
+    if (canPlot) {
+      els.stateProfilePoint.style.left = `${clamp(dynamics.average, 3, 97)}%`;
+      els.stateProfilePoint.style.bottom = `${clamp((dynamics.dailyRmssd / 30) * 100, 3, 97)}%`;
+      els.stateProfilePoint.title = `平均状态 ${dynamics.average.toFixed(1)} · 日间 RMSSD ${dynamics.dailyRmssd.toFixed(1)}`;
+    }
+    els.stateProfileInterpretation.textContent = dynamics.interpretation;
+    els.stateProfileConfidence.textContent = `结论置信度：${dynamics.confidence} · RMSSD 仅连接连续自然日`;
     renderStabilityStrip(dynamics);
     renderRecoveryPath(dynamics.recovery);
     renderList(els.dynamicsDataQuality, dynamics.quality, "暂无足够数据");
@@ -2243,10 +2365,12 @@
   }
 
   function momentaryStateTimeline() {
-    return dailyTimeline().map((item) => ({
-      ...item,
-      state: stateValue(item.record),
-    }));
+    return dailyTimeline()
+      .filter((item) => timeBucket(item.record) !== "unknown")
+      .map((item) => ({
+        ...item,
+        state: stateValue(item.record),
+      }));
   }
 
   function destroyChart(key) {
@@ -2481,6 +2605,7 @@
       valueLabel: inspection?.valueLabel || AXIS_META[role].label,
       secondaryValues: inspection?.secondaryValues || null,
       secondaryLabel: inspection?.secondaryLabel || "",
+      notes: inspection?.notes || null,
     });
   }
 
@@ -2580,6 +2705,7 @@
     const value = model.values[index];
     const range = model.ranges?.[index];
     const secondaryValue = model.secondaryValues?.[index];
+    const note = model.notes?.[index] || "";
 
     ui.label.textContent = String(model.labels[index]);
     if (Number.isFinite(value)) {
@@ -2590,9 +2716,13 @@
       ui.value.textContent = `${model.valueLabel} 无有效记录`;
     }
     if (model.secondaryLabel) {
-      ui.secondary.textContent = Number.isFinite(secondaryValue)
+      const secondaryText = Number.isFinite(secondaryValue)
         ? `${model.secondaryLabel} ${formatInspectorValue(secondaryValue)}`
         : `${model.secondaryLabel} 无有效记录`;
+      ui.secondary.textContent = [secondaryText, note].filter(Boolean).join(" · ");
+      ui.secondary.classList.remove("hidden");
+    } else if (note) {
+      ui.secondary.textContent = note;
       ui.secondary.classList.remove("hidden");
     } else {
       ui.secondary.textContent = "";
@@ -2703,6 +2833,13 @@
     return Number.isFinite(value) ? value.toFixed(1) : "-";
   }
 
+  function stateCoverageNote(value) {
+    if (!value) return "";
+    const coverage = `指标覆盖 ${Math.round((value.coverage || 0) * 100)}%`;
+    if (!value.imputedWeight) return coverage;
+    return `${coverage} · 中性补位 ${Math.round(value.imputedWeight * 100)}% · 最大误差 ±${(value.uncertainty || 0).toFixed(1)}`;
+  }
+
   function formatStateDelta(delta, longWindow = false) {
     if (!Number.isFinite(delta)) return "暂无可比变化";
     const prefix = longWindow ? "最近 14 天较最早 14 天" : "后段较前段";
@@ -2726,8 +2863,15 @@
     const indicatorCoverage = Number.isFinite(summary.coverage)
       ? ` · 指标覆盖 ${Math.round(summary.coverage * 100)}%`
       : "";
+    const uncertainty = Number.isFinite(summary.uncertainty) && summary.uncertainty > 0
+      ? ` · 最大误差 ±${summary.uncertainty.toFixed(1)}`
+      : "";
     els.overviewStateCoverage.textContent =
-      `${summary.valid.length}/${days} 个有效日${indicatorCoverage}`;
+      `${summary.valid.length}/${days} 个有效日${indicatorCoverage}${uncertainty}`;
+    const model = activeScoreModel();
+    els.overviewStateModel.textContent = activeScoreModelId() === SCORE_MODEL_V2
+      ? `${model.label} · 40/25/15/12/8 · 缺失项中性补位`
+      : `${model.label} · 45/30/10/10/5 · 按已填指标重分配`;
     const dates = dateValues(state.selectedDate, days);
     const chartValues = days === 56
       ? rollingStateValues(summary.daily)
@@ -2746,6 +2890,7 @@
           ? summary.daily.map((item) => item?.score ?? null)
           : null,
         secondaryLabel: days === 56 ? "当日状态" : "",
+        notes: summary.daily.map(stateCoverageNote),
       }
     );
   }
@@ -2763,7 +2908,7 @@
         early === null || late === null ? null : late - early
       );
       els.trendStateSummary.textContent =
-        `${valid.length}/${timeline.length} 个有效时间点 · 需要愉快和紧张担忧`;
+        `${valid.length}/${timeline.length} 个有效时间点 · ${activeScoreModel().label} · 需要愉快和紧张担忧`;
       makeLineChart(
         "state",
         els.stateCanvas,
@@ -2771,7 +2916,10 @@
         values,
         "state",
         false,
-        { valueLabel: "状态指数" }
+        {
+          valueLabel: "状态指数",
+          notes: timeline.map((item) => stateCoverageNote(item.state)),
+        }
       );
       return;
     }
@@ -2781,29 +2929,28 @@
     const indicatorCoverage = Number.isFinite(summary.coverage)
       ? ` · 指标覆盖 ${Math.round(summary.coverage * 100)}%`
       : "";
+    const uncertainty = Number.isFinite(summary.uncertainty) && summary.uncertainty > 0
+      ? ` · 最大误差 ±${summary.uncertainty.toFixed(1)}`
+      : "";
     els.trendStateSummary.textContent =
       `${summary.valid.length}/${days} 个有效日 · ${
         days === 56 ? "曲线为 14 天滚动均值" : "每日按时段等权"
-      }${indicatorCoverage}`;
+      } · ${activeScoreModel().label}${indicatorCoverage}${uncertainty}`;
     const dates = dateValues(state.selectedDate, days);
     const dynamics = computeDynamics(dates);
     const chartValues = days === 56
       ? rollingStateValues(summary.daily)
       : summary.daily.map((item) => item?.score ?? null);
-    const ranges = dynamics.daily.map((item) => item.range
+    const ranges = dynamics.daily.map((item) => item.range?.count >= 2
       ? { min: item.range.min, max: item.range.max, mean: item.range.mean }
       : null);
-    const markers = dynamics.jumps.map((item) => ({
-      ...item,
-      index: dates.indexOf(item.date),
-    }));
     makeStateDynamicsChart(
       "state",
       els.stateCanvas,
       dates.map((date) => date.slice(5)),
       chartValues,
       ranges,
-      markers,
+      [],
       {
         labels: dates,
         valueLabel: days === 56 ? "14 天滚动均值" : "状态指数",
@@ -2811,24 +2958,9 @@
           ? summary.daily.map((item) => item?.score ?? null)
           : null,
         secondaryLabel: days === 56 ? "当日状态" : "",
+        notes: summary.daily.map(stateCoverageNote),
       }
     );
-  }
-
-  function renderTrendPreview() {
-    const dates = dateValues(state.selectedDate, 7);
-    const labels = dates.map((date) => date.slice(5));
-    [
-      ["valence", "miniValence", els.miniValenceCanvas, els.miniValenceValue],
-      ["energeticArousal", "miniEnergy", els.miniEnergyCanvas, els.miniEnergyValue],
-      ["tenseArousal", "miniTension", els.miniTensionCanvas, els.miniTensionValue],
-    ].forEach(([role, key, canvas, valueElement]) => {
-      const aggregates = aggregateRole(role, dates);
-      const values = aggregates.map((item) => item?.mean ?? null);
-      const latest = [...values].reverse().find((value) => value !== null);
-      valueElement.textContent = latest === undefined ? "-" : latest.toFixed(1);
-      makeLineChart(key, canvas, labels, values, role, true);
-    });
   }
 
   function timeSortValue(value) {
@@ -3073,8 +3205,8 @@
   }
 
   function volatilityLabel(severity) {
-    if (severity === "stable") return "稳定";
-    if (severity === "medium") return "中等";
+    if (severity === "stable") return "低波动";
+    if (severity === "medium") return "中等波动";
     if (severity === "high") return "高波动";
     return "数据不足";
   }
@@ -3101,13 +3233,13 @@
       .filter((item) => item.text)
       .slice(0, 3)
       .map((item) => `${item.time} ${truncatePromptText(item.text, 90)}`);
-    const rangeText = range
+    const rangeText = range?.count >= 2
       ? `${formatStateScore(range.min)} / ${formatStateScore(range.max)}`
       : "- / -";
     return [
       `### ${date}`,
       `- 平均状态：${formatStateScore(day?.score ?? range?.mean)}`,
-      `- 当天最高/最低：${rangeText}`,
+      `- 当天最高/最低：${rangeText}${range?.count === 1 ? "（仅一个时间点）" : ""}`,
       `- 波动：${volatilityLabel(day?.severity)}`,
       `- 反刍：${strongestRumination(records)}`,
       `- 关键活动：${activities.length ? activities.join("；") : "无明显活动文本"}`,
@@ -3203,9 +3335,9 @@
     if (recovery.recovered) {
       const hours = recovery.hours;
       const duration = hours < 24 ? `${hours.toFixed(1)} 小时` : `${(hours / 24).toFixed(1)} 天`;
-      lines.push(`  - 恢复用时：${duration}，到 ${recovery.recovered.date} ${recovery.recovered.time}`);
+      lines.push(`  - 首次观测恢复：低点后 ${duration}，到 ${recovery.recovered.date} ${recovery.recovered.time}${recovery.lowConfidence ? "；采样间隔较大，实际恢复时间不能精确判断" : ""}`);
     } else {
-      lines.push("  - 恢复用时：窗口内尚未回到目标。");
+      lines.push("  - 首次观测恢复：窗口内尚未观测到回到目标。");
     }
     return lines;
   }
@@ -3234,6 +3366,11 @@
     if (timeline.length < 4) qualityNotes.push("有效时间点很少，以下分析应视为低置信度线索。");
     if (longestMissingRun(summary.daily) > 1) qualityNotes.push("存在连续缺失日期，请避免把未记录时段当作状态稳定。");
     if (coverage.count < 3) qualityNotes.push("记录时段覆盖不均匀，请谨慎比较不同日期。");
+    if (dynamics.invalidTimeCount > 0) qualityNotes.push(`${dynamics.invalidTimeCount} 条记录因时间无效未进入日均和动力学计算。`);
+    const model = activeScoreModel();
+    const modelDescription = activeScoreModelId() === SCORE_MODEL_V2
+      ? "愉快40% / 平静25% / 能量15% / 低反刍12% / 身体舒适8%；非核心缺失项按50分中性补位"
+      : "愉快45% / 平静30% / 能量10% / 低反刍10% / 身体舒适5%；按已填写指标重新分配权重";
     const markdown = [
       "# 我的 7 天情绪周复盘 Context",
       "",
@@ -3250,6 +3387,11 @@
       `- 有效时间点：${timeline.length}`,
       `- 最长连续缺失：${longestMissingRun(summary.daily)} 天`,
       `- 时段覆盖：${coverage.count}/4（${coverage.text}）`,
+      `- 个人状态模型：${model.label}`,
+      `- 模型口径：${modelDescription}`,
+      `- 平均指标覆盖：${formatPromptNumber((summary.coverage || 0) * 100, 0)}%`,
+      `- 中性补位：${formatPromptNumber((summary.imputedWeight || 0) * 100, 0)}%${summary.uncertainty ? `，综合分最大不确定范围 ±${summary.uncertainty.toFixed(1)}` : ""}`,
+      `- 动力学置信度：${dynamics.confidence}`,
       `- 注意：${qualityNotes.length ? qualityNotes.join(" ") : "记录频率可能不均匀，请避免把未记录时段当作状态稳定。"}`,
       "",
       "## 2. 一周数值摘要",
@@ -3263,9 +3405,10 @@
       `- 最近段相对前段：${changeText(summary.delta)}`,
       "",
       "## 3. 情绪动力学摘要",
-      `- 稳定性分数：${formatPromptNumber(dynamics.stability, 0)}`,
+      `- 日间 RMSSD：${formatPromptNumber(dynamics.dailyRmssd)}（${dynamics.dailyPairCount} 组连续自然日配对）`,
+      `- 状态画像：${dynamics.interpretation}`,
       `- 最大日内波动：${dynamics.maxSwing ? `${dynamics.maxSwing.swing.toFixed(1)}，发生在 ${dynamics.maxSwing.date}` : "-"}`,
-      `- 平均跳变：${formatPromptNumber(dynamics.meanJump)}`,
+      `- 日内相邻跳变 RMSSD：${formatPromptNumber(dynamics.meanJump)}（仅计算同日且间隔不超过12小时的记录）`,
       "- 明显跳变：",
       ...(visibleJumps.length ? visibleJumps.map(formatJumpLine) : ["  - 暂无明显跳变。"]),
       "- 恢复路径：",
@@ -3421,6 +3564,9 @@
     els.analyticsButton.addEventListener("click", openAnalyticsDialog);
     els.trendSettingsButton.addEventListener("click", openAnalyticsDialog);
     els.aiWeeklyButton.addEventListener("click", openAiWeeklyDialog);
+    els.detailedAnalysis.addEventListener("toggle", () => {
+      if (els.detailedAnalysis.open) requestAnimationFrame(renderTrends);
+    });
     els.backupButton.addEventListener("click", exportFullBackup);
     els.backupFileInput.addEventListener("change", (event) => restoreFullBackup(event.target.files[0]));
     els.openTrendsButton.addEventListener("click", () => switchView("trends"));
@@ -3553,7 +3699,6 @@
       bindEvents.resizeTimer = setTimeout(() => {
         if (state.activeView === "overview") {
           renderStateOverview();
-          renderTrendPreview();
         } else if (state.activeView === "trends") {
           renderTrends();
         }

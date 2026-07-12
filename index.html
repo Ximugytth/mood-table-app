@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=8.6.1" />
+    <link rel="stylesheet" href="./styles.css?v=8.7.0" />
   </head>
   <body>
     <div class="app-shell">
@@ -118,7 +118,7 @@
                 <strong id="overviewStateScore">-</strong>
                 <span id="overviewStateDelta">等待足够数据</span>
                 <small id="overviewStateCoverage">0 个有效日</small>
-                <small>愉快 45% · 平静 30% · 能量 10% · 低反刍 10% · 身体舒适 5%</small>
+                <small id="overviewStateModel">个人状态模型 v2 · 固定权重 · 缺失项中性补位</small>
               </div>
               <div class="state-chart-frame">
                 <canvas id="overviewStateCanvas" aria-label="综合状态趋势"></canvas>
@@ -126,29 +126,9 @@
             </div>
           </section>
 
-          <section class="trend-preview" aria-label="最近七天情绪趋势">
-            <div class="section-heading">
-              <div>
-                <span class="eyebrow">最近 7 天</span>
-                <h3>三轴状态趋势</h3>
-              </div>
-              <button id="openTrendsButton" class="primary-button" type="button">查看趋势</button>
-            </div>
-            <div class="mini-chart-grid">
-              <article class="mini-chart-item">
-                <div><span>愉快</span><strong id="miniValenceValue">-</strong></div>
-                <canvas id="miniValenceCanvas" aria-label="最近七天愉快趋势"></canvas>
-              </article>
-              <article class="mini-chart-item">
-                <div><span>能量</span><strong id="miniEnergyValue">-</strong></div>
-                <canvas id="miniEnergyCanvas" aria-label="最近七天能量趋势"></canvas>
-              </article>
-              <article class="mini-chart-item">
-                <div><span>紧张担忧</span><strong id="miniTensionValue">-</strong></div>
-                <canvas id="miniTensionCanvas" aria-label="最近七天紧张担忧趋势"></canvas>
-              </article>
-            </div>
-          </section>
+          <div class="overview-trend-action">
+            <button id="openTrendsButton" class="primary-button" type="button">查看状态趋势</button>
+          </div>
 
           <section class="summary-panel" aria-label="记录摘要">
             <div class="section-heading">
@@ -260,77 +240,105 @@
             <div class="chart-frame state-main-chart"><canvas id="stateCanvas"></canvas></div>
           </section>
 
-          <section class="dynamics-section" aria-label="情绪动力学分析">
-            <div class="section-heading">
+          <section class="dynamics-section" aria-label="状态水平与波动负荷">
+            <div class="section-heading dynamics-heading">
               <div>
-                <span class="eyebrow">动力学</span>
-                <h3>状态稳定性</h3>
+                <span class="eyebrow">二维状态画像</span>
+                <h3>状态水平 × 波动负荷</h3>
+              </div>
+              <button id="aiWeeklyButton" class="tool-button" type="button">AI 周复盘</button>
+            </div>
+            <div class="state-profile-layout">
+              <div class="state-profile-plot" role="img" aria-labelledby="stateProfileTitle stateProfileInterpretation">
+                <span id="stateProfileTitle" class="sr-only">状态水平与波动负荷二维图</span>
+                <span class="profile-axis profile-axis-y">波动负荷</span>
+                <span class="profile-axis profile-axis-x">状态水平</span>
+                <span class="profile-reference profile-reference-x" aria-hidden="true"></span>
+                <span class="profile-reference profile-reference-y" aria-hidden="true"></span>
+                <span class="profile-quadrant q-high-calm">较好且平稳</span>
+                <span class="profile-quadrant q-high-volatile">较好但波动</span>
+                <span class="profile-quadrant q-low-calm">持续偏低</span>
+                <span class="profile-quadrant q-low-volatile">偏低且波动</span>
+                <span id="stateProfilePoint" class="state-profile-point hidden"></span>
+              </div>
+              <div class="state-profile-summary">
+                <div><span>平均状态</span><strong id="dynamicsAverage">-</strong></div>
+                <div><span>日间 RMSSD</span><strong id="dynamicsDailyRmssd">-</strong></div>
+                <p id="stateProfileInterpretation">等待足够数据</p>
+                <small id="stateProfileConfidence">结论置信度：不足</small>
               </div>
             </div>
-            <button id="aiWeeklyButton" class="tool-button ai-weekly-button" type="button">AI 周复盘</button>
-            <div class="dynamics-metrics">
-              <article><span>平均状态</span><strong id="dynamicsAverage">-</strong></article>
-              <article><span>稳定性</span><strong id="dynamicsStability">-</strong></article>
-              <article><span>最大日内波动</span><strong id="dynamicsMaxSwing">-</strong></article>
-              <article><span>平均跳变</span><strong id="dynamicsMeanJump">-</strong></article>
+            <div class="stability-core">
+              <div class="core-block-heading">
+                <strong>日内波动条带</strong>
+                <span>至少两个有效时间点才计算</span>
+              </div>
+              <div id="dynamicsStabilityStrip" class="stability-strip" aria-label="每日波动条带"></div>
             </div>
-            <div class="dynamics-visuals">
-              <article>
-                <strong>稳定性条带</strong>
-                <div id="dynamicsStabilityStrip" class="stability-strip" aria-label="每日稳定性条带"></div>
-              </article>
-              <article>
-                <strong>恢复路径</strong>
-                <div id="dynamicsRecoveryPath" class="recovery-path" aria-label="低点后的恢复路径"></div>
-              </article>
-            </div>
-            <div class="dynamics-grid">
-              <article>
-                <strong>恢复时间</strong>
-                <p id="dynamicsRecovery">等待足够数据</p>
-              </article>
-              <article>
-                <strong>数据质量</strong>
-                <ul id="dynamicsDataQuality"></ul>
-              </article>
-              <article>
-                <strong>时间列表</strong>
-                <ul id="dynamicsEventList"></ul>
-              </article>
-              <article>
-                <strong>维度组合模式</strong>
-                <ul id="dynamicsPatternList"></ul>
-              </article>
+            <div class="quality-core">
+              <strong>数据质量</strong>
+              <ul id="dynamicsDataQuality"></ul>
             </div>
           </section>
 
-          <section class="axis-chart-list" aria-label="三轴趋势图">
-            <article class="axis-chart">
-              <div class="axis-chart-heading"><div><strong>愉快</strong><span>效价 · 消极到积极</span></div><span id="valenceRangeLabel">-5 ～ 5</span></div>
-              <div class="chart-frame"><canvas id="valenceCanvas"></canvas></div>
-            </article>
-            <article class="axis-chart">
-              <div class="axis-chart-heading"><div><strong>能量</strong><span>精力性唤醒 · 疲惫到充沛</span></div><span id="energyRangeLabel">-5 ～ 5</span></div>
-              <div class="chart-frame"><canvas id="energyCanvas"></canvas></div>
-            </article>
-            <article class="axis-chart">
-              <div class="axis-chart-heading"><div><strong>紧张担忧</strong><span>紧张性唤醒 · 平静到强烈担忧</span></div><span id="tensionRangeLabel">0 ～ 10</span></div>
-              <div class="chart-frame"><canvas id="tensionCanvas"></canvas></div>
-            </article>
-          </section>
+          <details id="detailedAnalysis" class="detailed-analysis">
+            <summary>详细分析</summary>
+            <div class="detail-content">
+              <section class="detail-metrics" aria-label="详细动力学指标">
+                <article><span>最大日内波动</span><strong id="dynamicsMaxSwing">-</strong></article>
+                <article><span>相邻跳变 RMSSD</span><strong id="dynamicsMeanJump">-</strong></article>
+                <article><span>连续日配对</span><strong id="dynamicsPairCount">-</strong></article>
+              </section>
+              <section class="dynamics-visuals">
+                <article>
+                  <strong>恢复路径</strong>
+                  <div id="dynamicsRecoveryPath" class="recovery-path" aria-label="低点后的恢复路径"></div>
+                </article>
+                <article>
+                  <strong>首次观测恢复</strong>
+                  <p id="dynamicsRecovery">等待足够数据</p>
+                </article>
+              </section>
+              <section class="dynamics-grid">
+                <article>
+                  <strong>时间列表</strong>
+                  <ul id="dynamicsEventList"></ul>
+                </article>
+                <article>
+                  <strong>维度组合模式</strong>
+                  <ul id="dynamicsPatternList"></ul>
+                </article>
+              </section>
 
-          <section class="context-section" aria-label="解释层">
-            <div class="section-heading"><div><span class="eyebrow">解释层</span><h3>反刍与活动</h3></div></div>
-            <div class="context-grid">
-              <article class="context-block"><strong>反刍轨道</strong><div id="ruminationTrack" class="track-list"></div></article>
-              <article class="context-block"><strong>活动事件</strong><div id="activityTrack" class="track-list"></div></article>
+              <section class="axis-chart-list" aria-label="三轴趋势图">
+                <article class="axis-chart">
+                  <div class="axis-chart-heading"><div><strong>愉快</strong><span>效价 · 消极到积极</span></div><span id="valenceRangeLabel">-5 ～ 5</span></div>
+                  <div class="chart-frame"><canvas id="valenceCanvas"></canvas></div>
+                </article>
+                <article class="axis-chart">
+                  <div class="axis-chart-heading"><div><strong>能量</strong><span>精力性唤醒 · 疲惫到充沛</span></div><span id="energyRangeLabel">-5 ～ 5</span></div>
+                  <div class="chart-frame"><canvas id="energyCanvas"></canvas></div>
+                </article>
+                <article class="axis-chart">
+                  <div class="axis-chart-heading"><div><strong>紧张担忧</strong><span>紧张性唤醒 · 平静到强烈担忧</span></div><span id="tensionRangeLabel">0 ～ 10</span></div>
+                  <div class="chart-frame"><canvas id="tensionCanvas"></canvas></div>
+                </article>
+              </section>
+
+              <section class="context-section" aria-label="解释层">
+                <div class="section-heading"><div><span class="eyebrow">解释层</span><h3>反刍与活动</h3></div></div>
+                <div class="context-grid">
+                  <article class="context-block"><strong>反刍轨道</strong><div id="ruminationTrack" class="track-list"></div></article>
+                  <article class="context-block"><strong>活动事件</strong><div id="activityTrack" class="track-list"></div></article>
+                </div>
+              </section>
+
+              <section class="axis-chart pain-section" aria-label="腰痛趋势">
+                <div class="axis-chart-heading"><div><strong>腰痛</strong><span>身体状态 · 舒适度占状态指数 8%</span></div><span id="painRangeLabel">0 ～ 10</span></div>
+                <div class="chart-frame"><canvas id="painCanvas"></canvas></div>
+              </section>
             </div>
-          </section>
-
-          <section class="axis-chart pain-section" aria-label="腰痛趋势">
-            <div class="axis-chart-heading"><div><strong>腰痛</strong><span>身体状态 · 舒适度占状态指数 5%</span></div><span id="painRangeLabel">0 ～ 10</span></div>
-            <div class="chart-frame"><canvas id="painCanvas"></canvas></div>
-          </section>
+          </details>
         </section>
       </main>
     </div>
@@ -389,6 +397,14 @@
           <h2>分析设置</h2>
         </div>
         <p class="dialog-copy">设置每个指标在图表中的作用。这里不会修改模板列名或原始记录。</p>
+        <label class="stacked-field analytics-model-field">
+          <span>个人状态计算模型</span>
+          <select id="scoreModelSelect">
+            <option value="whole-person-v2">个人状态模型 v2（推荐）</option>
+            <option value="legacy-v1">旧版模型 v1（对照）</option>
+          </select>
+          <small>切换后会用同一模型重算全部历史图表，不会修改原始记录。</small>
+        </label>
         <div id="analyticsList" class="analytics-list"></div>
         <div class="dialog-actions">
           <button class="quiet-button" id="cancelAnalyticsButton" type="button">取消</button>
@@ -414,6 +430,6 @@
     </dialog>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=8.6.1" defer></script>
+    <script src="./app.js?v=8.7.0" defer></script>
   </body>
 </html>

@@ -1,9 +1,9 @@
-const CACHE_NAME = "mood-table-app-v8-6-1-ai-weekly-context-20260709-r1";
+const CACHE_NAME = "mood-table-app-v8-7-analysis-v2-20260712-r1";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=8.6.1",
-  "./app.js?v=8.6.1",
+  "./styles.css?v=8.7.0",
+  "./app.js?v=8.7.0",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",
